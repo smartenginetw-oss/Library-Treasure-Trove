@@ -51,6 +51,20 @@
     return Array.isArray(value) ? value.filter(Boolean) : [];
   }
 
+  function canonicalPlatform(value) {
+    const raw = String(value || '').trim();
+    if (raw.startsWith('Instagram')) return 'Instagram';
+    if (raw.startsWith('TikTok')) return 'TikTok';
+    if (raw.startsWith('YouTube')) return 'YouTube Shorts';
+    if (raw.startsWith('Threads')) return 'Threads';
+    return raw;
+  }
+
+  function normalizePlatforms(value) {
+    const allowed = new Set(['Instagram', 'TikTok', 'YouTube Shorts', 'Threads']);
+    return [...new Set(safeArray(value).map(canonicalPlatform).filter(platform => allowed.has(platform)))];
+  }
+
   function lines(value) {
     if (Array.isArray(value)) return value.filter(Boolean).map(String);
     return String(value || '')
@@ -109,6 +123,7 @@
     state.profile.contentTaboos = lines(state.profile.contentTaboos);
     state.profile.availableTools = lines(state.profile.availableTools);
     state.profile.weeklyTime ??= '';
+    state.profile.platforms = normalizePlatforms(state.profile.platforms);
     state.profile.contentPillars = Array.from({ length: 3 }, (_, index) => {
       const current = state.profile.contentPillars?.[index] || {};
       return { name: current.name || '', responsibility: current.responsibility || '', evidence: current.evidence || '' };
@@ -603,6 +618,7 @@
       'Instagram': 'Instagram 社群',
       'YouTube Shorts': 'YouTube 短影音',
       'TikTok': 'TikTok 短影音',
+      'Threads': 'Threads 貼文',
       'Hook': '開場鉤子',
       'AI Analyze': '智慧分析',
       'AI API': '智慧服務介面',
@@ -624,9 +640,14 @@
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
     nodes.forEach(node => {
-      if (/^(SCRIPT|STYLE|PRE|TEXTAREA|INPUT)$/.test(node.parentElement?.tagName)) return;
+      if (/^(SCRIPT|STYLE|PRE|TEXTAREA|INPUT|OPTION)$/.test(node.parentElement?.tagName)) return;
       let value = node.nodeValue;
       Object.keys(map).sort((a, b) => b.length - a.length).forEach(key => { value = value.split(key).join(map[key]); });
+      value = value
+        .replace(/Instagram 社群(?:\s+社群)+/g, 'Instagram 社群')
+        .replace(/TikTok 短影音(?:\s+短影音)+/g, 'TikTok 短影音')
+        .replace(/YouTube 短影音(?:\s+短影音)+/g, 'YouTube 短影音')
+        .replace(/Threads 貼文(?:\s+貼文)+/g, 'Threads 貼文');
       node.nodeValue = value;
     });
   }
@@ -717,13 +738,86 @@
     };
   }
 
+  const PLATFORM_LABELS = {
+    Instagram: 'Instagram 社群',
+    TikTok: 'TikTok 短影音',
+    'YouTube Shorts': 'YouTube 短影音',
+    Threads: 'Threads 貼文'
+  };
+
+  function platformLabel(value) {
+    return PLATFORM_LABELS[value] || value;
+  }
+
+  function enhancePlatformPickers() {
+    document.querySelectorAll('select[multiple][name="platforms"]:not([data-platform-enhanced])').forEach(select => {
+      select.dataset.platformEnhanced = 'true';
+      const wrap = document.createElement('div');
+      wrap.className = 'multi-select-picker';
+      select.parentNode.insertBefore(wrap, select);
+      wrap.appendChild(select);
+
+      const helper = document.createElement('div');
+      helper.className = 'multi-select-helper';
+      helper.textContent = '可複選，選中的平台會套用到內容工作流。';
+      const summary = document.createElement('div');
+      summary.className = 'multi-select-summary';
+      const options = document.createElement('div');
+      options.className = 'multi-select-options';
+      options.setAttribute('role', 'group');
+      options.setAttribute('aria-label', '主要平台');
+      const choices = [...select.options].map(option => {
+        const value = option.value;
+        option.setAttribute('value', value);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'multi-select-option';
+        button.dataset.value = value;
+        button.textContent = platformLabel(value);
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => {
+          option.selected = !option.selected;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          sync();
+        });
+        options.appendChild(button);
+        return { option, button, value };
+      });
+      const sync = () => {
+        const selected = choices.filter(choice => choice.option.selected);
+        choices.forEach(({ option, button }) => {
+          const active = option.selected;
+          button.classList.toggle('selected', active);
+          button.setAttribute('aria-pressed', String(active));
+        });
+        summary.replaceChildren();
+        if (!selected.length) {
+          const empty = document.createElement('span');
+          empty.className = 'multi-select-empty';
+          empty.textContent = '尚未選擇平台';
+          summary.appendChild(empty);
+          return;
+        }
+        selected.forEach(({ value }) => {
+          const chip = document.createElement('span');
+          chip.className = 'multi-select-selected';
+          chip.textContent = platformLabel(value);
+          summary.appendChild(chip);
+        });
+      };
+      select.addEventListener('change', sync);
+      wrap.append(helper, summary, options);
+      sync();
+    });
+  }
+
   const legacySettings = settings;
   const legacyForms = forms;
   const legacyGenerate = generate;
   const legacyDashboard = dashboard;
   const legacyRender = render;
   // 保留原本的創作者設定（平台、門檻等進階欄位）；新的定位資料卡獨立成工作流入口。
-  settings = function () { legacySettings(); };
+  settings = function () { legacySettings(); enhancePlatformPickers(); };
   forms = function () { legacyForms(); addAngleToForms(); };
   generate = function () { legacyGenerate(); addAngleToGenerate(); };
   dashboard = function () {
@@ -752,6 +846,7 @@
       addAngleToGenerate();
       if (typeof enhanceSelects === 'function') enhanceSelects();
       if (typeof enhanceCategoryPicker === 'function') enhanceCategoryPicker();
+      if (typeof enhancePlatformPickers === 'function') enhancePlatformPickers();
       localizeVisibleText();
     }, 0);
   }
@@ -796,6 +891,10 @@
   document.head.insertAdjacentHTML('beforeend', `<style id="date-time-picker-style">
     .date-time-picker{position:relative;width:100%}.date-time-trigger{width:100%;min-height:42px;padding:9px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--dark);font-weight:500;text-align:left;transition:border-color .16s,box-shadow .16s}.date-time-trigger:hover,.date-time-trigger[aria-expanded="true"]{border-color:var(--pink);box-shadow:0 0 0 3px rgba(201,147,138,.12)}.date-time-trigger-chevron{color:var(--gray);font-size:1.1rem;line-height:1;transition:transform .16s}.date-time-trigger[aria-expanded="true"] .date-time-trigger-chevron{transform:rotate(180deg)}.date-time-popover{position:absolute;left:0;top:calc(100% + 9px);z-index:100;width:min(460px,calc(100vw - 32px));display:grid;grid-template-columns:minmax(0,1.1fr) minmax(170px,.9fr);gap:0;padding:14px;background:var(--paper);border:1px solid var(--line);border-radius:22px;box-shadow:0 18px 42px rgba(48,38,31,.18);color:var(--dark)}.date-time-popover[hidden]{display:none!important}.date-time-popover.above{top:auto;bottom:calc(100% + 9px)}.date-time-calendar{min-width:0;padding-right:14px}.date-time-calendar-head{display:grid;grid-template-columns:34px 1fr 34px;align-items:center;gap:7px;margin-bottom:12px}.date-time-calendar-head strong{text-align:center;font-size:13px}.date-time-nav,.date-time-today,.date-time-period{border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--medium);font-weight:700}.date-time-nav{width:32px;height:32px;padding:0;font-size:20px;line-height:1}.date-time-nav:hover,.date-time-today:hover,.date-time-period:hover{border-color:var(--pink);color:var(--pink);background:var(--cream)}.date-time-weekdays,.date-time-days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}.date-time-weekdays{margin-bottom:5px;color:var(--gray);font-size:10px;font-weight:700}.date-time-day{width:32px;height:32px;justify-self:center;padding:0;border:1px solid transparent;border-radius:999px;background:transparent;color:var(--dark);font-size:11px}.date-time-day:hover,.date-time-day:focus-visible{border-color:var(--soft-pink);background:var(--light-pink);outline:none}.date-time-day.outside{color:#c4beb5}.date-time-day.today{border-color:var(--soft-blue);color:var(--blue);font-weight:800}.date-time-day.selected{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:800;box-shadow:0 3px 7px rgba(122,155,173,.24)}.date-time-today{display:block;margin:10px auto 0;padding:6px 12px;font-size:10px}.date-time-time{display:grid;align-content:start;gap:12px;padding-left:14px;border-left:1px solid var(--line)}.date-time-time-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.date-time-time-head strong{font-size:13px}.date-time-time-head span{color:var(--gray);font-size:10px}.date-time-time-controls{display:grid;grid-template-columns:minmax(54px,1fr) auto minmax(54px,1fr);align-items:end;gap:5px}.date-time-time-controls label{display:grid;gap:5px;color:var(--gray);font-size:10px;font-weight:700}.date-time-time-controls input{width:100%;min-width:0;border:1px solid var(--line);border-radius:999px;padding:8px 6px;background:#fff;color:var(--dark);text-align:center;font-size:13px}.date-time-time-controls input:focus{border-color:var(--pink);outline:0;box-shadow:0 0 0 3px rgba(201,147,138,.12)}.date-time-colon{align-self:end;padding-bottom:8px;color:var(--gray);font-weight:800}.date-time-period{min-height:36px;padding:7px 10px;grid-column:1/-1;background:var(--light-blue);border-color:var(--soft-blue);color:#537184}.date-time-time p{margin:0;color:var(--gray);font-size:10px;line-height:1.55}.date-time-popover-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:7px;padding-top:12px;margin-top:2px;border-top:1px solid var(--line)}
     @media(max-width:760px){.date-time-popover{grid-template-columns:1fr;width:min(100%,calc(100vw - 32px));max-height:calc(100vh - 24px);overflow:auto}.date-time-calendar{padding:0 0 14px}.date-time-time{padding:14px 0 0;border-left:0;border-top:1px solid var(--line)}}
+  </style>`);
+
+  document.head.insertAdjacentHTML('beforeend', `<style id="multi-select-picker-style">
+    .multi-select-picker{position:relative;display:grid;gap:9px}.multi-select-picker select{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;overflow:hidden!important}.multi-select-helper{font-size:10px;color:var(--gray)}.multi-select-summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-height:30px}.multi-select-selected,.multi-select-empty{display:inline-flex;align-items:center;min-height:27px;padding:5px 10px;border-radius:999px;font-size:10px;font-weight:700}.multi-select-selected{background:var(--light-blue);color:#537184}.multi-select-empty{border:1px dashed #d6d0c5;color:var(--gray)}.multi-select-options{display:flex;flex-wrap:wrap;gap:7px}.multi-select-option{border:1px solid var(--line);background:#fffefa;color:var(--medium);padding:8px 12px;border-radius:999px;font-size:11px;font-weight:700;transition:background .16s,border-color .16s,color .16s,transform .16s}.multi-select-option:hover,.multi-select-option:focus-visible{border-color:var(--pink);color:var(--pink);background:var(--cream);outline:none}.multi-select-option.selected{border-color:var(--soft-blue);background:var(--light-blue);color:#537184;box-shadow:0 0 0 2px rgba(184,207,218,.2)}
   </style>`);
 
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。
