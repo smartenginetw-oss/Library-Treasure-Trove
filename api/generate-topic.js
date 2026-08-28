@@ -110,8 +110,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return methodNotAllowed(res);
   try {
-    if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('尚未設定伺服器端智慧服務金鑰'), { code: 'AI_NOT_CONFIGURED', status: 503 });
     const { client, user } = await authenticateRequest(req);
+    if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('尚未設定伺服器端智慧服務金鑰'), { code: 'AI_NOT_CONFIGURED', status: 503 });
     const input = topicInput(readJson(req));
     const prompt = [
       '你是「藏書閣寶典」的內容策略顧問。請以繁體中文產生一個原創選題。',
