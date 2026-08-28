@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.local
+chrome-verify-profile/
+edge-verify-profile/
+.verify-profile-cloud/
+藏書閣寶典-桌面.png
