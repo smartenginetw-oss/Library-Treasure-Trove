@@ -3,7 +3,7 @@
 -- 測試需在測試資料庫建立兩個 auth.users fixture 後，再以 request.jwt.claim.sub
 -- 切換兩個使用者執行 select/insert/update/delete。
 begin;
-select plan(14);
+select plan(23);
 
 select has_table('public', 'creator_profiles', 'creator_profiles table exists');
 select has_table('public', 'viral_contents', 'viral_contents table exists');
@@ -11,6 +11,9 @@ select has_table('public', 'topics', 'topics table exists');
 select has_table('public', 'formulas', 'formulas table exists');
 select has_table('public', 'viral_analyses', 'viral_analyses table exists');
 select has_table('public', 'saved_viral_contents', 'saved_viral_contents table exists');
+select has_table('public', 'content_deliverables', 'content_deliverables table exists');
+select has_table('public', 'content_reviews', 'content_reviews table exists');
+select has_table('public', 'workflow_tasks', 'workflow_tasks table exists');
 
 select is((select relrowsecurity from pg_class where oid = 'public.creator_profiles'::regclass), true, 'creator_profiles has RLS');
 select is((select relrowsecurity from pg_class where oid = 'public.viral_contents'::regclass), true, 'viral_contents has RLS');
@@ -18,9 +21,15 @@ select is((select relrowsecurity from pg_class where oid = 'public.topics'::regc
 select is((select relrowsecurity from pg_class where oid = 'public.formulas'::regclass), true, 'formulas has RLS');
 select is((select relrowsecurity from pg_class where oid = 'public.viral_analyses'::regclass), true, 'viral_analyses has RLS');
 select is((select relrowsecurity from pg_class where oid = 'public.saved_viral_contents'::regclass), true, 'saved_viral_contents has RLS');
+select is((select relrowsecurity from pg_class where oid = 'public.content_deliverables'::regclass), true, 'content_deliverables has RLS');
+select is((select relrowsecurity from pg_class where oid = 'public.content_reviews'::regclass), true, 'content_reviews has RLS');
+select is((select relrowsecurity from pg_class where oid = 'public.workflow_tasks'::regclass), true, 'workflow_tasks has RLS');
 
 select ok((select count(*) >= 4 from pg_policies where schemaname = 'public' and tablename = 'topics'), 'topics has CRUD policies');
 select ok((select count(*) >= 4 from pg_policies where schemaname = 'public' and tablename = 'creator_profiles'), 'creator_profiles has CRUD policies');
+select ok((select count(*) >= 4 from pg_policies where schemaname = 'public' and tablename = 'content_deliverables'), 'content_deliverables has CRUD policies');
+select ok((select count(*) >= 4 from pg_policies where schemaname = 'public' and tablename = 'content_reviews'), 'content_reviews has CRUD policies');
+select ok((select count(*) >= 4 from pg_policies where schemaname = 'public' and tablename = 'workflow_tasks'), 'workflow_tasks has CRUD policies');
 
 select * from finish();
 rollback;

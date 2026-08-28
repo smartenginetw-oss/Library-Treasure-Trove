@@ -47,6 +47,9 @@
       status: row.status,
       sourceViralContentId: row.source_viral_content_id,
       contentCategory: row.content_category,
+      angle: row.angle || payload.angle || '',
+      topicScore: row.topic_score || payload.topicScore || null,
+      reviewDueAt: row.review_due_at || payload.reviewDueAt || null,
       createdAt: row.created_at
     };
   }
@@ -94,18 +97,36 @@
     };
   }
 
+  function rowToDeliverable(row) {
+    const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+    return { ...payload, id: row.id, topicId: row.topic_id, title: row.title, angle: row.angle, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+
+  function rowToReview(row) {
+    const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+    return { ...payload, id: row.id, topicId: row.topic_id, topicTitle: row.topic_title, publishedAt: row.published_at, reviewDueAt: row.review_due_at, reach: row.reach, watchTime: row.watch_time, saves: row.saves, shares: row.shares, dms: row.dms, variable: row.variable, diagnosis: row.diagnosis, nextTest: row.next_test, createdAt: row.created_at };
+  }
+
+  function rowToWorkflowTask(row) {
+    const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+    return { ...payload, id: row.id, day: row.day, title: row.title, detail: row.detail, completed: row.completed, completedAt: row.completed_at, createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+
   async function pullState() {
     if (!client || !session?.user) return null;
-    const [profileResult, topicsResult, formulasResult, savedResult, viralsResult] = await Promise.all([
+    const [profileResult, topicsResult, formulasResult, savedResult, viralsResult, deliverablesResult, reviewsResult, tasksResult] = await Promise.all([
       client.from('creator_profiles').select('*').maybeSingle(),
       client.from('topics').select('*').order('updated_at', { ascending: false }),
       client.from('formulas').select('*').order('updated_at', { ascending: false }),
       client.from('saved_viral_contents').select('viral_content_id'),
-      client.from('viral_contents').select('*').eq('archived', false).order('created_at', { ascending: false })
+      client.from('viral_contents').select('*').eq('archived', false).order('created_at', { ascending: false }),
+      client.from('content_deliverables').select('*').order('updated_at', { ascending: false }),
+      client.from('content_reviews').select('*').order('created_at', { ascending: false }),
+      client.from('workflow_tasks').select('*').order('day', { ascending: true })
     ]);
-    const firstError = [profileResult, topicsResult, formulasResult, savedResult, viralsResult].find(result => result.error);
+    const firstError = [profileResult, topicsResult, formulasResult, savedResult, viralsResult, deliverablesResult, reviewsResult, tasksResult].find(result => result.error);
     if (firstError) throw firstError.error;
-    const hasRemoteData = Boolean(profileResult.data || topicsResult.data?.length || formulasResult.data?.length || savedResult.data?.length || viralsResult.data?.length);
+    const hasRemoteData = Boolean(profileResult.data || topicsResult.data?.length || formulasResult.data?.length || savedResult.data?.length || viralsResult.data?.length || deliverablesResult.data?.length || reviewsResult.data?.length || tasksResult.data?.length);
     if (!hasRemoteData) return null;
     const profile = profileResult.data ? {
       name: profileResult.data.display_name,
@@ -118,14 +139,25 @@
       contentGoal: profileResult.data.content_goal,
       platforms: profileResult.data.platforms || [],
       outlierThreshold: profileResult.data.outlier_threshold,
-      customCategories: profileResult.data.custom_categories || []
+      customCategories: profileResult.data.custom_categories || [],
+      positioningSentence: profileResult.data.positioning_sentence || '',
+      creatorStrengths: profileResult.data.creator_strengths || [],
+      experienceStories: profileResult.data.experience_stories || [],
+      audienceQuestions: profileResult.data.audience_questions || [],
+      contentTaboos: profileResult.data.content_taboos || [],
+      contentPillars: profileResult.data.content_pillars || [],
+      weeklyTime: profileResult.data.weekly_time || '',
+      availableTools: profileResult.data.available_tools || []
     } : null;
     return {
       profile,
       topics: (topicsResult.data || []).map(rowToTopic),
       formulas: (formulasResult.data || []).map(rowToFormula),
       savedViralIds: (savedResult.data || []).map(row => row.viral_content_id),
-      virals: (viralsResult.data || []).map(rowToViral)
+      virals: (viralsResult.data || []).map(rowToViral),
+      deliverables: (deliverablesResult.data || []).map(rowToDeliverable),
+      reviews: (reviewsResult.data || []).map(rowToReview),
+      workflowTasks: (tasksResult.data || []).map(rowToWorkflowTask)
     };
   }
 
@@ -138,7 +170,10 @@
         profile: localState.profile,
         topics: localState.topics,
         formulas: localState.formulas,
-        savedViralIds: localState.savedViralIds || []
+        savedViralIds: localState.savedViralIds || [],
+        deliverables: localState.deliverables || [],
+        reviews: localState.reviews || [],
+        workflowTasks: localState.workflowTasks || []
       })
     });
     const payload = await response.json().catch(() => ({}));
@@ -258,7 +293,7 @@
     const response = await fetch(`${apiBase}/api/generate-topic`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify(input)
+        body: JSON.stringify({ ...input, angle: input?.angle || window.formAngle || '' })
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.message || '智慧服務暫時無法回應');

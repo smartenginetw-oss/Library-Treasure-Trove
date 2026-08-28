@@ -4,6 +4,7 @@ node_modules/
 !.env.example
 *.local
 chrome-verify-profile/
+chrome-verify-*/
 edge-verify-profile/
 .verify-profile-cloud/
 藏書閣寶典-桌面.png

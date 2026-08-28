@@ -1,0 +1,650 @@
+/*
+ * 藏書閣寶典｜自媒體工作流增強模組
+ *
+ * 這裡把兩份工作手冊中可以直接執行的步驟，接到既有的單檔本機／雲端狀態：
+ * 1. 定位資料卡：定位句、三個內容支柱、經驗與禁區。
+ * 2. 題目切角與評分：錯誤／步驟／案例／觀點／清單，以及五項 1–5 分評估。
+ * 3. 內容交付包：五段式母內容、七頁輪播、四平台改寫、拍攝分鏡。
+ * 4. 七天工作流與 48–72 小時復盤。
+ *
+ * 所有資料仍沿用 state + localStorage；登入後由 cloud-bridge 的同步 API 傳到
+ * Supabase。沒有伺服器端智慧服務時，交付包依相同契約產生規則式草稿，不假裝是 AI 結果。
+ */
+(function () {
+  'use strict';
+
+  const WORKFLOW_ANGLES = ['錯誤', '步驟', '案例', '觀點', '清單'];
+  const WORKFLOW_KEYS = ['demand', 'saveValue', 'evidence', 'conversion', 'effort'];
+  const WORKFLOW_LABELS = {
+    demand: '需求強度',
+    saveValue: '收藏價值',
+    evidence: '個人證據',
+    conversion: '轉換連結',
+    effort: '製作可行'
+  };
+  const WORKFLOW_TASKS = [
+    { day: 1, title: '完成定位資料卡', detail: '一句定位＋三個內容支柱＋內容禁區' },
+    { day: 2, title: '建立 30 題題庫', detail: '每個內容支柱先寫 10 個受眾問題' },
+    { day: 3, title: '延伸五種內容切角', detail: '錯誤、步驟、案例、觀點、清單' },
+    { day: 4, title: '評分並挑出優先題目', detail: '五項條件各 1–5 分，先做高分題' },
+    { day: 5, title: '完成一份內容交付包', detail: '母內容、七頁輪播與拍攝分鏡' },
+    { day: 6, title: '改寫成四平台版本', detail: 'Reels、IG 輪播、Threads、Email' },
+    { day: 7, title: '發布並排 48–72 小時復盤', detail: '只測一個變因，記錄下一步行動' }
+  ];
+  const PLATFORM_RULES = {
+    'Reels': '前 3 秒點出處境；口語短句；每 3–5 秒切畫面；結尾保留一個留言關鍵字。',
+    'IG 輪播': '封面先講處境或結果；一頁一個重點；步驟可截圖；結尾只放一個收藏或留言 CTA。',
+    'Threads': '第一句放觀點；每段短句；保留一個真實經驗；最後用問題邀請討論。',
+    'Email': '補上背景、案例與限制；主旨直接說讀者利益；結尾放一個連結或回信 CTA。'
+  };
+  const CAROUSEL_TEMPLATE = [
+    { key: 'cover', title: '封面｜讓陌生人停下來', hint: '受眾處境＋明確結果，不要塞完整解法。' },
+    { key: 'resonance', title: '共鳴｜說出他現在卡在哪', hint: '把抽象痛點換成今天會發生的情境。' },
+    { key: 'framework', title: '框架｜給一張可理解的地圖', hint: '先講原則或判斷方式，讓讀者知道接下來怎麼走。' },
+    { key: 'method', title: '方法｜第一個今天能做的動作', hint: '步驟、判斷標準或完成線，避免只有鼓勵。' },
+    { key: 'case', title: '案例｜用前後差異建立可信度', hint: '放自己的經驗、對話、數字或限制條件。' },
+    { key: 'check', title: '檢查｜讓內容值得回來看', hint: '清單、錯誤提醒或完成檢核。' },
+    { key: 'cta', title: 'CTA｜只承接一個下一步', hint: '留言、收藏、私訊或連結只選一個。' }
+  ];
+
+  function safeArray(value) {
+    return Array.isArray(value) ? value.filter(Boolean) : [];
+  }
+
+  function lines(value) {
+    if (Array.isArray(value)) return value.filter(Boolean).map(String);
+    return String(value || '')
+      .split(/\r?\n|、/)
+      .map(item => item.trim())
+      .filter(Boolean);
+  }
+
+  function joinLines(value) {
+    return safeArray(value).join('\n');
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '尚未排程';
+    const dateValue = new Date(value);
+    if (Number.isNaN(dateValue.getTime())) return '尚未排程';
+    return new Intl.DateTimeFormat('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(dateValue);
+  }
+
+  function isoAfterHours(hours) {
+    return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+  }
+
+  function scoreTotal(score) {
+    if (!score || typeof score !== 'object') return null;
+    const values = WORKFLOW_KEYS.map(key => Number(score[key])).filter(value => Number.isFinite(value));
+    return values.length === WORKFLOW_KEYS.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  }
+
+  function scoreStatus(total) {
+    if (!Number.isFinite(total)) return { label: '尚未評分', className: 'blue' };
+    if (total >= 20) return { label: '優先製作', className: 'sage' };
+    if (total >= 16) return { label: '先修正再做', className: 'pink' };
+    return { label: '題庫待定', className: 'dark' };
+  }
+
+  function workflowProfileComplete(profile = state.profile) {
+    const pillars = safeArray(profile.contentPillars).filter(item => item && (item.name || item.responsibility || item.evidence));
+    const checks = [
+      Boolean(String(profile.positioningSentence || '').trim()),
+      pillars.length >= 3,
+      Boolean(String(profile.audienceIdentity || '').trim()),
+      Boolean(String(profile.audienceProblem || '').trim()),
+      Boolean(String(profile.audienceDesiredResult || '').trim()),
+      Boolean(safeArray(profile.contentTaboos).length)
+    ];
+    return { done: checks.filter(Boolean).length, total: checks.length, complete: checks.every(Boolean) };
+  }
+
+  function ensureWorkflowState() {
+    state.profile ||= {};
+    state.profile.positioningSentence ??= '';
+    state.profile.creatorStrengths = lines(state.profile.creatorStrengths);
+    state.profile.experienceStories = lines(state.profile.experienceStories);
+    state.profile.audienceQuestions = lines(state.profile.audienceQuestions);
+    state.profile.contentTaboos = lines(state.profile.contentTaboos);
+    state.profile.availableTools = lines(state.profile.availableTools);
+    state.profile.weeklyTime ??= '';
+    state.profile.contentPillars = Array.from({ length: 3 }, (_, index) => {
+      const current = state.profile.contentPillars?.[index] || {};
+      return { name: current.name || '', responsibility: current.responsibility || '', evidence: current.evidence || '' };
+    });
+    state.topics = (state.topics || []).map((topic, index) => ({
+      ...topic,
+      angle: topic.angle || topic.contentAngle || WORKFLOW_ANGLES[index % WORKFLOW_ANGLES.length],
+      topicScore: topic.topicScore || null,
+      reviewDueAt: topic.reviewDueAt || null
+    }));
+    state.deliverables ||= [];
+    state.reviews ||= [];
+    state.workflowTasks ||= WORKFLOW_TASKS.map((task, index) => ({ id: `day-${index + 1}`, ...task, completed: false }));
+    if (!Array.isArray(state.workflowTasks) || state.workflowTasks.length !== WORKFLOW_TASKS.length) {
+      const oldTasks = new Map((state.workflowTasks || []).map(task => [task.id || `day-${task.day}`, task]));
+      state.workflowTasks = WORKFLOW_TASKS.map((task, index) => ({ id: `day-${index + 1}`, ...task, completed: Boolean(oldTasks.get(`day-${index + 1}`)?.completed) }));
+    }
+  }
+
+  ensureWorkflowState();
+
+  function addWorkflowNavigation() {
+    const sideNav = document.getElementById('sideNav');
+    if (sideNav && !sideNav.querySelector('[data-route="positioning"]')) {
+      const links = [
+        ['positioning', '◎', '定位資料卡'],
+        ['workflow', '▦', '內容工作流'],
+        ['topic-scoring', '◇', '題目評分'],
+        ['reviews', '↻', '復盤實驗']
+      ];
+      const settingsLink = sideNav.querySelector('[data-route="settings"]');
+      links.forEach(([routeName, icon, label]) => {
+        const link = document.createElement('a');
+        link.className = 'nav-link';
+        link.href = `#/${routeName}`;
+        link.dataset.route = routeName;
+        link.innerHTML = `<span class="nav-icon">${icon}</span>${label}`;
+        sideNav.insertBefore(link, settingsLink || null);
+      });
+    }
+    const mobileNav = document.getElementById('mobileNav');
+    if (mobileNav && !mobileNav.querySelector('[data-route="positioning"]')) {
+      const links = [
+        ['positioning', '◎', '定位'],
+        ['workflow', '▦', '工作流'],
+        ['topic-scoring', '◇', '評分'],
+        ['reviews', '↻', '復盤']
+      ];
+      links.forEach(([routeName, icon, label]) => {
+        const link = document.createElement('a');
+        link.href = `#/${routeName}`;
+        link.dataset.route = routeName;
+        link.innerHTML = `<span>${icon}</span>${label}`;
+        mobileNav.appendChild(link);
+      });
+    }
+  }
+
+  function field(label, name, value, options = {}) {
+    const tag = options.tag || 'input';
+    const attrs = options.attrs || '';
+    const placeholder = options.placeholder ? ` placeholder="${escapeHtml(options.placeholder)}"` : '';
+    const valueAttr = tag !== 'textarea' && tag !== 'select' && value !== undefined && value !== null ? ` value="${escapeHtml(value)}"` : '';
+    const content = tag === 'textarea'
+      ? escapeHtml(value || '')
+      : '';
+    return `<div class="form-field ${options.full ? 'full' : ''}"><label>${label}</label><${tag} name="${name}" ${attrs}${valueAttr}${placeholder}>${content}</${tag}></div>`;
+  }
+
+  function positioning() {
+    const profile = state.profile;
+    const completion = workflowProfileComplete(profile);
+    const pillars = profile.contentPillars || [];
+    const pillarFields = Array.from({ length: 3 }, (_, index) => {
+      const pillar = pillars[index] || {};
+      return `<article class="pillar-card"><div class="pillar-number">內容支柱 ${index + 1}</div>${field('支柱名稱', `pillar${index + 1}Name`, pillar.name, { placeholder: '例如：選題與內容系統' })}${field('它要回答的問題', `pillar${index + 1}Responsibility`, pillar.responsibility, { tag: 'textarea', placeholder: '這個支柱固定幫受眾解決什麼？' })}${field('可分享的證據', `pillar${index + 1}Evidence`, pillar.evidence, { tag: 'textarea', placeholder: '經驗、案例、數字或方法' })}</article>`;
+    }).join('');
+    layout('定位資料卡', '定位資料卡 ／ 先把真實資料餵給智慧服務', '手冊提醒：AI 可以整理與提案，但定位、經驗、禁區與最後判斷要由你提供。完成這張卡後，題庫與內容交付才會更像你的工作方式。', `<div class="workflow-progress"><div><strong>資料完整度 ${completion.done}/${completion.total}</strong><span>${completion.complete ? '可以進入題庫與創作' : '先補齊缺口，避免智慧服務自行猜測'}</span></div><div class="progress-track"><i style="width:${Math.round((completion.done / completion.total) * 100)}%"></i></div></div><form id="positioningForm" class="positioning-form" onsubmit="savePositioning(event)"><section class="panel"><div class="section-head"><div><h2>一句定位</h2><p>我幫【受眾】處理【具體問題】，透過【方法或內容】，讓他得到【結果】。</p></div></div><div class="form-grid">${field('顯示名稱', 'name', profile.name || '內容創作者', { attrs: 'required' })}${field('主要賽道', 'primaryNiche', profile.primaryNiche || NICHES[0], { tag: 'select' })}${field('一句定位', 'positioningSentence', profile.positioningSentence, { full: true, placeholder: '例如：我幫跨賽道創作者處理每天不知道做什麼，透過可驗證的選題流程，穩定產出內容。' })}${field('目標受眾', 'audienceIdentity', profile.audienceIdentity, { full: true, attrs: 'required' })}${field('受眾目前階段', 'audienceAge', profile.audienceAge, { placeholder: '例如：剛開始經營 3 個月內' })}${field('內容目標', 'contentGoal', profile.contentGoal || GOALS[0], { tag: 'select' })}${field('他最常卡住的問題', 'audienceProblem', profile.audienceProblem, { tag: 'textarea', full: true, placeholder: '寫成可觀察的具體情境' })}${field('希望他得到的結果', 'audienceDesiredResult', profile.audienceDesiredResult, { tag: 'textarea', full: true })}</div></section><section class="panel"><div class="section-head"><div><h2>三個內容支柱</h2><p>每個支柱都要有可持續分享的經驗或方法。</p></div></div><div class="pillar-grid">${pillarFields}</div></section><section class="panel"><div class="section-head"><div><h2>你的素材邊界</h2><p>資料不足時，智慧服務應該提問，不應該替你編造。</p></div></div><div class="form-grid">${field('我擅長的事（每行一項）', 'creatorStrengths', joinLines(profile.creatorStrengths), { tag: 'textarea', full: true, placeholder: '例如：把複雜流程拆成今天能做的步驟' })}${field('我經歷過的故事（每行一段）', 'experienceStories', joinLines(profile.experienceStories), { tag: 'textarea', full: true, placeholder: '例如：曾經連續一週只收藏不發布，後來改用題目評分' })}${field('受眾常問的問題（每行一題）', 'audienceQuestions', joinLines(profile.audienceQuestions), { tag: 'textarea', full: true, placeholder: '留言、私訊、諮詢或搜尋框出現的原話' })}${field('我不會談的內容（每行一項）', 'contentTaboos', joinLines(profile.contentTaboos), { tag: 'textarea', full: true, placeholder: '個資、未公開合約、不能證實的數字…' })}${field('每週可投入時間', 'weeklyTime', profile.weeklyTime, { placeholder: '例如：每週 3 小時' })}${field('可用工具（每行一項）', 'availableTools', joinLines(profile.availableTools), { tag: 'textarea', placeholder: '例如：手機、Canva、剪輯工具' })}</div></section><div class="form-actions"><button class="btn primary">儲存定位資料卡</button><button type="button" class="btn" onclick="navigate('topic-scoring')">去評分題目</button></div></form>`);
+    const primaryNiche = document.querySelector('#positioningForm [name="primaryNiche"]');
+    if (primaryNiche) primaryNiche.innerHTML = opt(NICHES, profile.primaryNiche || NICHES[0]);
+    const contentGoal = document.querySelector('#positioningForm [name="contentGoal"]');
+    if (contentGoal) contentGoal.innerHTML = opt(GOALS, profile.contentGoal || GOALS[0]);
+  }
+
+  function savePositioning(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form));
+    state.profile = {
+      ...state.profile,
+      name: String(values.name || '').trim() || '內容創作者',
+      primaryNiche: values.primaryNiche || state.profile.primaryNiche,
+      positioningSentence: String(values.positioningSentence || '').trim(),
+      audienceIdentity: String(values.audienceIdentity || '').trim(),
+      audienceAge: String(values.audienceAge || '').trim(),
+      audienceProblem: String(values.audienceProblem || '').trim(),
+      audienceDesiredResult: String(values.audienceDesiredResult || '').trim(),
+      contentGoal: values.contentGoal || state.profile.contentGoal,
+      creatorStrengths: lines(values.creatorStrengths),
+      experienceStories: lines(values.experienceStories),
+      audienceQuestions: lines(values.audienceQuestions),
+      contentTaboos: lines(values.contentTaboos),
+      availableTools: lines(values.availableTools),
+      weeklyTime: String(values.weeklyTime || '').trim(),
+      contentPillars: [1, 2, 3].map(index => ({
+        name: String(values[`pillar${index}Name`] || '').trim(),
+        responsibility: String(values[`pillar${index}Responsibility`] || '').trim(),
+        evidence: String(values[`pillar${index}Evidence`] || '').trim()
+      }))
+    };
+    save();
+    toast('定位資料卡已儲存，後續題目會沿用這些條件');
+    positioning();
+  }
+
+  function topicLabel(topic) {
+    const total = scoreTotal(topic.topicScore);
+    const status = scoreStatus(total);
+    return `${topic.angle || WORKFLOW_ANGLES[0]} · ${status.label}${total === null ? '' : ` ${total}/25`}`;
+  }
+
+  function scoreInputs(topic) {
+    return WORKFLOW_KEYS.map(key => `<div class="score-input"><label>${WORKFLOW_LABELS[key]}<span>1–5</span></label><input name="${key}" type="number" min="1" max="5" step="1" value="${Number(topic.topicScore?.[key]) || 3}" required><small>${key === 'demand' ? '受眾現在是否真的遇到？' : key === 'saveValue' ? '是否值得之後回來看？' : key === 'evidence' ? '是否有你的經驗或明確判斷？' : key === 'conversion' ? '能否自然承接下一步？' : '兩小時內或現有素材可完成？'}</small></div>`).join('');
+  }
+
+  function topicScoring() {
+    const topics = (state.topics || []).filter(topic => topic.status !== 'ARCHIVED');
+    const selectedId = window.workflowScoreTopicId && topics.some(topic => topic.id === window.workflowScoreTopicId) ? window.workflowScoreTopicId : topics[0]?.id;
+    window.workflowScoreTopicId = selectedId;
+    const selected = topics.find(topic => topic.id === selectedId);
+    const list = topics.map(topic => {
+      const total = scoreTotal(topic.topicScore);
+      const status = scoreStatus(total);
+      return `<button type="button" class="score-topic-row ${topic.id === selectedId ? 'active' : ''}" onclick="window.workflowScoreTopicId='${topic.id}';topicScoring()"><span><strong>${escapeHtml(topic.title)}</strong><small>${escapeHtml(topic.targetAudience || '尚未填寫受眾')} · ${escapeHtml(topic.angle || '未選切角')}</small></span><em class="tag ${status.className}">${status.label}${total === null ? '' : ` ${total}/25`}</em></button>`;
+    }).join('');
+    const editor = selected ? `<form class="panel score-editor" onsubmit="saveTopicScore(event,'${selected.id}')"><div class="section-head"><div><h2>評估：${escapeHtml(selected.title)}</h2><p>先用條件決定順序，不要只看爆款分數。</p></div><span class="tag blue">${escapeHtml(selected.angle || '未選切角')}</span></div><div class="score-grid">${scoreInputs(selected)}</div><div class="form-field"><label>評分理由與下一個修正</label><textarea name="notes" placeholder="哪個條件最弱？下一版要改哪一個變因？">${escapeHtml(selected.topicScore?.notes || '')}</textarea></div><div class="score-summary"><span>目前總分</span><strong id="liveTopicScore">—</strong><span>20 分以上優先製作／16–19 分先修正／15 分以下先留在題庫</span></div><div class="form-actions"><button class="btn primary">儲存評分</button><button type="button" class="btn" onclick="openTopic('${selected.id}')">編輯題目</button></div></form>` : '<div class="empty"><strong>還沒有可評分的題目</strong>先到智慧選題或七十七式建立一筆題目。</div>';
+    layout('題目評分', '題目評分 ／ 先做對順序，再開始製作', '依手冊的需求、收藏、證據、轉換與製作可行五個條件評分；每次只先修正一個最弱條件。', `<div class="scoring-layout"><section class="panel"><div class="section-head"><div><h2>題目清單</h2><p>${topics.length} 筆內容資產</p></div></div><div class="score-topic-list">${list || '<div class="empty"><strong>題庫是空的</strong>先產生第一個題目。</div>'}</div></section>${editor}</div><div class="notice">這是工作排序工具，不是平台官方預測。分數會跟著題目同步保存，之後可以在內容工作流直接建立交付包。</div>`);
+    const form = document.querySelector('.score-editor');
+    if (form) {
+      const update = () => {
+        const value = WORKFLOW_KEYS.reduce((sum, key) => sum + (Number(form.elements[key]?.value) || 0), 0);
+        const output = form.querySelector('#liveTopicScore');
+        if (output) output.textContent = `${value}/25`;
+      };
+      form.querySelectorAll('input[type="number"]').forEach(input => input.addEventListener('input', update));
+      update();
+    }
+  }
+
+  function saveTopicScore(event, id) {
+    event.preventDefault();
+    const topic = state.topics.find(item => item.id === id);
+    if (!topic) return;
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    topic.topicScore = {
+      ...Object.fromEntries(WORKFLOW_KEYS.map(key => [key, Math.max(1, Math.min(5, Number(values[key]) || 1))])),
+      notes: String(values.notes || '').trim(),
+      updatedAt: new Date().toISOString()
+    };
+    topic.topicScore.total = scoreTotal(topic.topicScore);
+    save();
+    toast(`已儲存評分：${topic.topicScore.total}/25`);
+    topicScoring();
+  }
+
+  function sourceTopicOptions(selectedId) {
+    return (state.topics || []).filter(topic => topic.status !== 'ARCHIVED').map(topic => `<option value="${escapeHtml(topic.id)}" ${topic.id === selectedId ? 'selected' : ''}>${escapeHtml(topic.title)}</option>`).join('');
+  }
+
+  function selectedTopic(id) {
+    return state.topics.find(topic => topic.id === id) || state.topics.find(topic => topic.status !== 'ARCHIVED') || state.topics[0];
+  }
+
+  function createDeliverable(topic, input = {}) {
+    const profile = state.profile;
+    const core = String(input.coreMessage || topic.differentiation || topic.hook || topic.title).trim();
+    const caseText = String(input.caseText || profile.experienceStories?.[0] || '補上你的真實案例、對話或前後差異。').trim();
+    const cta = String(input.cta || topic.cta || '收藏這份檢查表，下次照著做。').trim();
+    const audience = topic.targetAudience || profile.audienceIdentity || '目標受眾';
+    const structure = safeArray(topic.contentStructure);
+    const segments = [
+      { key: 'hook', label: '鉤子', text: topic.hook || `如果你是${audience}，先看這個常被忽略的問題。` },
+      { key: 'pain', label: '痛點', text: `很多${audience}會卡在：${profile.audienceProblem || '知道要做，卻不知道先做哪一步。'}` },
+      { key: 'method', label: '方法', text: structure[2] || `先把「${core}」拆成一個今天能完成的動作，再設定完成標準。` },
+      { key: 'case', label: '案例', text: caseText },
+      { key: 'cta', label: 'CTA', text: cta }
+    ];
+    const carouselPages = CAROUSEL_TEMPLATE.map((page, index) => {
+      const fallback = [
+        topic.title,
+        `如果你是${audience}，這個卡點可能每天都在發生。`,
+        `先用一個判斷框架處理「${core}」。`,
+        segments[2].text,
+        caseText,
+        `發布前檢查：有處境、有方法、有證據，而且只留一個 CTA。`,
+        cta
+      ][index];
+      return { ...page, text: fallback };
+    });
+    const platformVersions = {
+      'Reels': `${segments[0].text}\n\n${segments[1].text}\n\n做法：${segments[2].text}\n\n${segments[3].text}\n\n${segments[4].text}`,
+      'IG 輪播': carouselPages.map((page, index) => `P${String(index + 1).padStart(2, '0')}｜${page.title}\n${page.text}`).join('\n\n'),
+      'Threads': `${core}\n\n${segments[1].text}\n\n我的做法是：${segments[2].text}\n\n${segments[3].text}\n\n你目前卡在哪一步？`,
+      'Email': `主旨：${topic.title}\n\n${segments[1].text}\n\n${segments[2].text}\n\n案例：${segments[3].text}\n\n下一步：${segments[4].text}`
+    };
+    const shots = [
+      { shot: '01', label: '鉤子', scene: '正面近景', action: '看鏡頭指出處境', check: '收音清楚' },
+      { shot: '02', label: '痛點', scene: '桌前中景', action: '展示卡住的工具或畫面', check: '字幕空間足夠' },
+      { shot: '03', label: '方法', scene: '俯拍桌面', action: '手寫步驟或操作工具', check: '畫面清楚' },
+      { shot: '04', label: '案例', scene: '側面近景', action: '放前後差異、舊照片或成果', check: '有證據' },
+      { shot: '05', label: 'CTA', scene: '正面中景', action: '指向留言或連結區', check: '關鍵字正確' }
+    ];
+    return {
+      id: uid('d'),
+      topicId: topic.id,
+      title: topic.title,
+      angle: topic.angle || WORKFLOW_ANGLES[0],
+      coreMessage: core,
+      audience,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      segments,
+      carouselPages,
+      platformVersions,
+      shots,
+      status: 'DRAFT'
+    };
+  }
+
+  function deliverableEditor(deliverable) {
+    const segmentFields = deliverable.segments.map(segment => `<div class="delivery-field"><label>${segment.label}</label><textarea name="segment_${segment.key}">${escapeHtml(segment.text)}</textarea></div>`).join('');
+    const pageFields = deliverable.carouselPages.map((page, index) => `<div class="carousel-page"><div class="carousel-page-head"><span>P${String(index + 1).padStart(2, '0')}</span><strong>${escapeHtml(page.title)}</strong><small>${escapeHtml(page.hint)}</small></div><textarea name="carousel_${index}">${escapeHtml(page.text)}</textarea></div>`).join('');
+    const platformFields = Object.entries(deliverable.platformVersions).map(([platform, text]) => `<div class="platform-version"><div class="platform-version-head"><strong>${platform}</strong><button type="button" class="btn tiny" onclick="copyText(this.previousElementSibling.parentElement.nextElementSibling.value)">複製</button></div><small>${PLATFORM_RULES[platform]}</small><textarea name="platform_${platform}">${escapeHtml(text)}</textarea></div>`).join('');
+    const shotFields = deliverable.shots.map((shot, index) => `<div class="shot-row"><span>${shot.shot}</span><input name="shot_${index}_label" value="${escapeHtml(shot.label)}"><input name="shot_${index}_scene" value="${escapeHtml(shot.scene)}"><input name="shot_${index}_action" value="${escapeHtml(shot.action)}"><input name="shot_${index}_check" value="${escapeHtml(shot.check)}"></div>`).join('');
+    return `<form class="delivery-editor" onsubmit="saveDeliverable(event,'${deliverable.id}')"><section class="panel"><div class="section-head"><div><h2>母內容五段式</h2><p>每一段只完成一個任務：讓人停下、感到被理解、學會方法、相信經驗、採取下一步。</p></div><span class="tag blue">${escapeHtml(deliverable.angle)}</span></div><div class="delivery-fields">${segmentFields}</div></section><section class="panel"><div class="section-head"><div><h2>七頁輪播</h2><p>封面不解釋全部；每頁一個重點；最後只保留一個 CTA。</p></div></div><div class="carousel-pages">${pageFields}</div></section><section class="panel"><div class="section-head"><div><h2>四平台改寫</h2><p>核心觀點與案例保持一致，只調整閱讀節奏與 CTA。</p></div></div><div class="platform-versions">${platformFields}</div></section><section class="panel"><div class="section-head"><div><h2>拍攝分鏡表</h2><p>依場景分組，一個場景一次拍完，減少來回換裝與找道具。</p></div></div><div class="shot-table"><div class="shot-row shot-head"><span>SHOT</span><span>段落</span><span>場景與鏡位</span><span>動作／B-roll</span><span>檢查</span></div>${shotFields}</div></section><div class="form-actions"><button class="btn primary">儲存內容交付包</button><button type="button" class="btn danger" onclick="deleteDeliverable('${deliverable.id}')">刪除交付包</button></div></form>`;
+  }
+
+  function workflow() {
+    const topics = (state.topics || []).filter(topic => topic.status !== 'ARCHIVED');
+    const selectedId = window.workflowTopicId && topics.some(topic => topic.id === window.workflowTopicId) ? window.workflowTopicId : topics[0]?.id;
+    window.workflowTopicId = selectedId;
+    const current = state.deliverables.find(item => item.id === window.workflowDeliverableId) || state.deliverables[0];
+    const taskDone = state.workflowTasks.filter(task => task.completed).length;
+    const taskMarkup = state.workflowTasks.map(task => `<button type="button" class="workflow-task ${task.completed ? 'completed' : ''}" onclick="toggleWorkflowTask('${task.id}')"><span class="task-check">${task.completed ? '✓' : task.day}</span><span><strong>第 ${task.day} 天｜${task.title}</strong><small>${task.detail}</small></span></button>`).join('');
+    const createPanel = topics.length ? `<section class="panel"><div class="section-head"><div><h2>建立內容交付包</h2><p>先選一個題目，再把真實案例與 CTA 補進去。</p></div></div><form onsubmit="createDeliverableFromForm(event)"><div class="form-grid"><div class="form-field full"><label>來源題目</label><select name="topicId" onchange="window.workflowTopicId=this.value">${sourceTopicOptions(selectedId)}</select></div>${field('核心觀點', 'coreMessage', selectedTopic(selectedId)?.differentiation || '', { tag: 'textarea', full: true, placeholder: '這一支內容最後希望讀者記住哪一句？' })}${field('真實案例或前後差異', 'caseText', state.profile.experienceStories?.[0] || '', { tag: 'textarea', full: true, placeholder: '不要讓智慧服務替你編造；沒有資料就先補上。' })}${field('唯一 CTA', 'cta', selectedTopic(selectedId)?.cta || '', { full: true, placeholder: '例如：留言「地圖」拿檢核表' })}</div><div class="form-actions"><button class="btn primary">建立可編輯交付包</button></div></form></section>` : '<div class="empty"><strong>先建立一個題目</strong>有了題目後，才能產出母內容與四平台版本。</div>';
+    const deliverables = state.deliverables.map(item => `<button type="button" class="delivery-list-row ${current?.id === item.id ? 'active' : ''}" onclick="window.workflowDeliverableId='${item.id}';workflow()"><span><strong>${escapeHtml(item.title)}</strong><small>${formatDateTime(item.updatedAt)} · ${escapeHtml(item.angle || '未選切角')}</small></span><em>${item.status === 'READY' ? '已完成' : '草稿'}</em></button>`).join('');
+    layout('內容工作流', '內容工作流 ／ 從一題走到可拍、可發、可復盤', '把手冊中的「母內容→輪播→短影音→四平台→分鏡」放進同一份交付包；每段都能直接編輯與複製。', `<div class="workflow-layout"><div>${createPanel}${current ? deliverableEditor(current) : '<section class="panel"><div class="empty"><strong>還沒有交付包</strong>建立後會在這裡出現可編輯版本。</div></section>'}</div><aside><section class="panel workflow-week"><div class="section-head"><div><h2>七天啟動計畫</h2><p>已完成 ${taskDone}/7 個交付物</p></div><span class="tag ${taskDone === 7 ? 'sage' : 'blue'}">${Math.round((taskDone / 7) * 100)}%</span></div><div class="workflow-task-list">${taskMarkup}</div></section><section class="panel"><div class="section-head"><div><h2>我的交付包</h2><p>保留每一輪的修改脈絡。</p></div></div><div class="delivery-list">${deliverables || '<div class="muted">尚未建立</div>'}</div></section></aside></div>`);
+  }
+
+  function createDeliverableFromForm(event) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const topic = selectedTopic(values.topicId);
+    if (!topic) return;
+    const deliverable = createDeliverable(topic, values);
+    state.deliverables.unshift(deliverable);
+    window.workflowDeliverableId = deliverable.id;
+    save();
+    toast('已建立內容交付包，可以逐段修改');
+    workflow();
+  }
+
+  function saveDeliverable(event, id) {
+    event.preventDefault();
+    const deliverable = state.deliverables.find(item => item.id === id);
+    if (!deliverable) return;
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    deliverable.segments = deliverable.segments.map(segment => ({ ...segment, text: String(values[`segment_${segment.key}`] || '').trim() }));
+    deliverable.carouselPages = deliverable.carouselPages.map((page, index) => ({ ...page, text: String(values[`carousel_${index}`] || '').trim() }));
+    deliverable.platformVersions = Object.fromEntries(Object.keys(deliverable.platformVersions).map(platform => [platform, String(values[`platform_${platform}`] || '').trim()]));
+    deliverable.shots = deliverable.shots.map((shot, index) => ({
+      ...shot,
+      label: String(values[`shot_${index}_label`] || '').trim(),
+      scene: String(values[`shot_${index}_scene`] || '').trim(),
+      action: String(values[`shot_${index}_action`] || '').trim(),
+      check: String(values[`shot_${index}_check`] || '').trim()
+    }));
+    deliverable.updatedAt = new Date().toISOString();
+    deliverable.status = 'READY';
+    save();
+    toast('內容交付包已儲存');
+    workflow();
+  }
+
+  function deleteDeliverable(id) {
+    if (!confirm('確定刪除這份內容交付包？')) return;
+    state.deliverables = state.deliverables.filter(item => item.id !== id);
+    window.workflowDeliverableId = null;
+    save();
+    toast('交付包已刪除');
+    workflow();
+  }
+
+  function toggleWorkflowTask(id) {
+    const task = state.workflowTasks.find(item => item.id === id);
+    if (!task) return;
+    task.completed = !task.completed;
+    task.completedAt = task.completed ? new Date().toISOString() : null;
+    save();
+    workflow();
+  }
+
+  function copyText(value) {
+    const textValue = String(value || '');
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(textValue).then(() => toast('內容已複製')).catch(() => toast('瀏覽器拒絕剪貼簿，請手動選取')); 
+    else toast('請手動選取內容複製');
+  }
+
+  function localizeVisibleText() {
+    const map = {
+      'CONTENT STRATEGY SYSTEM': '內容策略系統',
+      'AI 選題': '智慧選題',
+      'Problem / Setup': '問題／設定',
+      'Process': '過程',
+      'Result': '結果',
+      'Ending / CTA': '結尾／行動邀請',
+      'Vlog 實測': '實測紀錄',
+      'DASHBOARD': '儀表板',
+      'ONBOARDING': '開始設定',
+      'OUTLIER': '跨圈層',
+      'Viral Score': '爆款評估分數',
+      'Views / Followers': '觀看／粉絲',
+      'Views/Followers': '觀看／粉絲',
+      'Like/View': '按讚／觀看',
+      'Comment/View': '留言／觀看',
+      'Repeated Format Success': '重複格式成功度',
+      'Niche Match': '賽道吻合度',
+      'Velocity': '速度',
+      'Freshness': '新鮮度',
+      'Followers': '粉絲數',
+      'Likes': '按讚數',
+      'Comments': '留言數',
+      'Food': '美食',
+      'Travel': '旅遊',
+      'Lifestyle': '生活風格',
+      'Fashion': '時尚',
+      'Beauty': '美容保養',
+      'Fitness/Wellness': '健身／身心健康',
+      'Money': '理財',
+      'Tech/AI': '科技／人工智慧',
+      'Creator': '創作者',
+      'Comedy': '喜劇',
+      'Education': '教育',
+      'Pets': '寵物',
+      'Instagram': 'Instagram 社群',
+      'YouTube Shorts': 'YouTube 短影音',
+      'TikTok': 'TikTok 短影音',
+      'Hook': '開場鉤子',
+      'AI Analyze': '智慧分析',
+      'AI API': '智慧服務介面',
+      'JSON Schema': '固定格式規範',
+      'JSON': '結構化格式',
+      'Authentication': '登入驗證',
+      'RLS': '資料庫權限規則',
+      'CTA': '行動邀請',
+      'V/F': '觀看／粉絲',
+      'views': '觀看',
+      'IDEA': '靈感中',
+      'SAVED': '已收藏',
+      'PLANNED': '準備拍攝',
+      'FILMED': '已拍攝',
+      'PUBLISHED': '已發布',
+      'ARCHIVED': '已封存'
+    };
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (/^(SCRIPT|STYLE|PRE|TEXTAREA|INPUT)$/.test(node.parentElement?.tagName)) return;
+      let value = node.nodeValue;
+      Object.keys(map).sort((a, b) => b.length - a.length).forEach(key => { value = value.split(key).join(map[key]); });
+      node.nodeValue = value;
+    });
+  }
+
+  // 舊版曾直接掃描 SCRIPT 文字，會把已執行的原始碼也改寫；覆蓋成只處理可見文字的版本。
+  window.localizeUi = localizeVisibleText;
+  window.localizeUiExtra = localizeVisibleText;
+
+  function reviewDue(review) {
+    return review.reviewDueAt && new Date(review.reviewDueAt).getTime() <= Date.now();
+  }
+
+  function reviews() {
+    const topics = (state.topics || []).filter(topic => topic.status !== 'ARCHIVED');
+    const due = state.reviews.filter(reviewDue);
+    const rows = state.reviews.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(review => {
+      const topic = selectedTopic(review.topicId);
+      return `<article class="review-card"><div class="review-card-head"><div><strong>${escapeHtml(topic?.title || review.topicTitle || '已移除題目')}</strong><small>${review.publishedAt ? formatDateTime(review.publishedAt) : '未填發布時間'} · ${reviewDue(review) ? '可以復盤' : `預計 ${formatDateTime(review.reviewDueAt)}`}</small></div><span class="tag ${reviewDue(review) ? 'pink' : 'blue'}">${reviewDue(review) ? '待處理' : '觀察中'}</span></div><div class="review-metrics"><span>觸及 <b>${review.reach ?? '—'}</b></span><span>觀看／停留 <b>${review.watchTime ?? '—'}</b></span><span>收藏 <b>${review.saves ?? '—'}</b></span><span>分享 <b>${review.shares ?? '—'}</b></span><span>留言／私訊 <b>${review.dms ?? '—'}</b></span></div><p><strong>判斷：</strong>${escapeHtml(review.diagnosis || '尚未補上診斷')}</p><p><strong>下一個測試：</strong>${escapeHtml(review.nextTest || '尚未補上')}</p></article>`;
+    }).join('');
+    const topicSelect = topics.map(topic => `<option value="${escapeHtml(topic.id)}">${escapeHtml(topic.title)}</option>`).join('');
+    layout('復盤實驗', '復盤實驗 ／ 發布後 48–72 小時只測一個變因', '復盤不是判斷好或壞，而是把觸及、停留、收藏、分享、留言／私訊轉成下一個具體改動。沒有實際數據時，先留白，不讓系統替你猜。', `<div class="grid-2"><section class="panel"><div class="section-head"><div><h2>新增一筆復盤</h2><p>發布時間會預設在今天；可直接改成實際時間。</p></div></div><form onsubmit="saveReview(event)"><div class="form-grid"><div class="form-field full"><label>對應題目</label><select name="topicId">${topicSelect || '<option value="">尚未有題目</option>'}</select></div>${field('發布時間', 'publishedAt', new Date().toISOString().slice(0, 16), { attrs: 'type="datetime-local"' })}${field('觸及／曝光', 'reach', '', { attrs: 'type="number" min="0" placeholder="實際數字"' })}${field('觀看或平均停留', 'watchTime', '', { placeholder: '例如：平均 8 秒' })}${field('收藏', 'saves', '', { attrs: 'type="number" min="0"' })}${field('分享', 'shares', '', { attrs: 'type="number" min="0"' })}${field('留言／私訊', 'dms', '', { attrs: 'type="number" min="0"' })}${field('本次只測的變因', 'variable', '', { full: true, placeholder: '例如：只改封面第一句，其他保持一致' })}${field('數據判斷', 'diagnosis', '', { tag: 'textarea', full: true, placeholder: '觸及低、開頭滑走、收藏少或 CTA 斷掉？寫出證據。' })}${field('下一個具體測試', 'nextTest', '', { tag: 'textarea', full: true, placeholder: '下一篇只改哪一件事？' })}</div><div class="form-actions"><button class="btn primary" ${topics.length ? '' : 'disabled'}>儲存復盤並排程</button></div></form><div class="notice">系統會以發布時間＋48 小時建立復盤時間；建議在 48–72 小時之間實際查看平台洞察。</div></section><section class="panel"><div class="section-head"><div><h2>待處理復盤</h2><p>${due.length} 筆已到時間</p></div><button type="button" class="btn tiny" onclick="copyText('48–72 小時復盤提醒：回到藏書閣記錄觸及、停留、收藏、分享、留言／私訊，並只決定下一個測試變因。')">複製提醒</button></div><div class="review-list">${rows || '<div class="empty"><strong>還沒有復盤紀錄</strong>發布第一支內容後回來填寫。</div>'}</div></section></div>`);
+  }
+
+  function saveReview(event) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const topic = selectedTopic(values.topicId);
+    const publishedAt = values.publishedAt ? new Date(values.publishedAt).toISOString() : new Date().toISOString();
+    const review = {
+      id: uid('r'),
+      topicId: topic?.id || values.topicId || '',
+      topicTitle: topic?.title || '',
+      publishedAt,
+      reviewDueAt: new Date(new Date(publishedAt).getTime() + 48 * 60 * 60 * 1000).toISOString(),
+      reach: values.reach === '' ? null : Number(values.reach),
+      watchTime: String(values.watchTime || '').trim(),
+      saves: values.saves === '' ? null : Number(values.saves),
+      shares: values.shares === '' ? null : Number(values.shares),
+      dms: values.dms === '' ? null : Number(values.dms),
+      variable: String(values.variable || '').trim(),
+      diagnosis: String(values.diagnosis || '').trim(),
+      nextTest: String(values.nextTest || '').trim(),
+      createdAt: new Date().toISOString()
+    };
+    state.reviews.unshift(review);
+    if (topic) {
+      topic.reviewDueAt = review.reviewDueAt;
+      if (topic.status !== 'PUBLISHED') topic.status = 'PUBLISHED';
+    }
+    save();
+    toast('復盤已儲存，48 小時後回來補齊判斷');
+    reviews();
+  }
+
+  function appendAngleField(form, beforeElement) {
+    if (!form || form.querySelector('[name="angle"]')) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'form-field';
+    const current = window.formAngle || WORKFLOW_ANGLES[0];
+    wrapper.innerHTML = `<label>內容切角</label><select name="angle">${WORKFLOW_ANGLES.map(angle => `<option ${angle === current ? 'selected' : ''}>${angle}</option>`).join('')}</select>`;
+    wrapper.querySelector('select').addEventListener('change', event => { window.formAngle = event.currentTarget.value; });
+    form.insertBefore(wrapper, beforeElement || form.firstElementChild);
+  }
+
+  function addAngleToForms() {
+    if (route() !== '77-forms') return;
+    const form = document.querySelector('.matrix-layout form');
+    if (!form) return;
+    appendAngleField(form, form.querySelector('[name="subject"]')?.closest('.form-field'));
+  }
+
+  function addAngleToGenerate() {
+    if (route() !== 'generate') return;
+    const form = document.getElementById('generateForm');
+    if (!form) return;
+    appendAngleField(form.querySelector('.form-grid'), form.querySelector('[name="subject"]')?.closest('.form-field'));
+  }
+
+  function enhanceTopicDraft() {
+    const previousDraft = topicDraft;
+    topicDraft = function (input) {
+      const draft = previousDraft(input || {});
+      draft.angle = input?.angle || input?.contentAngle || window.formAngle || draft.angle || WORKFLOW_ANGLES[0];
+      draft.topicScore ||= null;
+      draft.reviewDueAt ||= null;
+      return draft;
+    };
+  }
+
+  const legacySettings = settings;
+  const legacyForms = forms;
+  const legacyGenerate = generate;
+  const legacyDashboard = dashboard;
+  const legacyRender = render;
+  // 保留原本的創作者設定（平台、門檻等進階欄位）；新的定位資料卡獨立成工作流入口。
+  settings = function () { legacySettings(); };
+  forms = function () { legacyForms(); addAngleToForms(); };
+  generate = function () { legacyGenerate(); addAngleToGenerate(); };
+  dashboard = function () {
+    legacyDashboard();
+    const completion = workflowProfileComplete(state.profile);
+    const dueCount = state.reviews.filter(reviewDue).length;
+    const content = document.getElementById('appContent');
+    if (!content || content.querySelector('[data-workflow-summary]')) return;
+    content.insertAdjacentHTML('beforeend', `<section class="panel workflow-summary" data-workflow-summary><div class="section-head"><div><h2>手冊工作流進度</h2><p>把定位、題庫、交付與復盤串成下一個可執行動作。</p></div><span class="tag ${completion.complete ? 'sage' : 'pink'}">定位 ${completion.done}/${completion.total}</span></div><div class="workflow-summary-grid"><button type="button" onclick="navigate('positioning')"><strong>定位資料卡</strong><small>補齊三支柱與素材邊界</small></button><button type="button" onclick="navigate('topic-scoring')"><strong>題目評分</strong><small>五項條件排出製作順序</small></button><button type="button" onclick="navigate('workflow')"><strong>內容交付包</strong><small>母內容、輪播、四平台、分鏡</small></button><button type="button" onclick="navigate('reviews')"><strong>復盤實驗</strong><small>${dueCount ? `有 ${dueCount} 筆待處理` : '發布後 48–72 小時回來記錄'}</small></button></div></section>`);
+  };
+  enhanceTopicDraft();
+
+  function enhancedRender() {
+    addWorkflowNavigation();
+    ensureWorkflowState();
+    const currentRoute = route();
+    if (currentRoute === 'positioning') positioning();
+    else if (currentRoute === 'workflow') workflow();
+    else if (currentRoute === 'topic-scoring') topicScoring();
+    else if (currentRoute === 'reviews') reviews();
+    else legacyRender();
+    addWorkflowNavigation();
+    setActive();
+    setTimeout(() => {
+      addAngleToForms();
+      addAngleToGenerate();
+      if (typeof enhanceSelects === 'function') enhanceSelects();
+      if (typeof enhanceCategoryPicker === 'function') enhanceCategoryPicker();
+      localizeVisibleText();
+    }, 0);
+  }
+
+  window.addEventListener('hashchange', enhancedRender);
+  window.removeEventListener('hashchange', legacyRender);
+  window.render = enhancedRender;
+  window.positioning = positioning;
+  window.topicScoring = topicScoring;
+  window.workflow = workflow;
+  window.reviews = reviews;
+  window.savePositioning = savePositioning;
+  window.saveTopicScore = saveTopicScore;
+  window.createDeliverableFromForm = createDeliverableFromForm;
+  window.saveDeliverable = saveDeliverable;
+  window.deleteDeliverable = deleteDeliverable;
+  window.toggleWorkflowTask = toggleWorkflowTask;
+  window.copyText = copyText;
+  window.saveReview = saveReview;
+
+  if (window.__bookVault?.mergeCloudState) {
+    const legacyMergeCloudState = window.__bookVault.mergeCloudState;
+    window.__bookVault.mergeCloudState = remote => {
+      legacyMergeCloudState(remote);
+      if (Array.isArray(remote?.deliverables) && remote.deliverables.length) state.deliverables = remote.deliverables;
+      if (Array.isArray(remote?.reviews) && remote.reviews.length) state.reviews = remote.reviews;
+      if (Array.isArray(remote?.workflowTasks) && remote.workflowTasks.length) state.workflowTasks = remote.workflowTasks;
+      ensureWorkflowState();
+      save();
+      enhancedRender();
+    };
+  }
+
+  document.head.insertAdjacentHTML('beforeend', `<style id="workflow-enhancements-style">
+    .workflow-progress{display:grid;gap:9px;background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:0 0 18px}.workflow-progress>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:12px}.workflow-progress strong{font-size:13px}.workflow-progress span{font-size:11px;color:var(--gray)}.progress-track{height:7px;border-radius:99px;background:#eee9e1;overflow:hidden}.progress-track i{display:block;height:100%;border-radius:inherit;background:var(--pink);transition:width .2s}.positioning-form{display:grid;gap:17px}.pillar-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.pillar-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fffdfa}.pillar-number{font-size:11px;color:var(--pink);font-weight:800;margin-bottom:10px}.pillar-card .form-field{margin-bottom:10px}.pillar-card .form-field:last-child{margin-bottom:0}.pillar-card textarea{min-height:76px}.scoring-layout{display:grid;grid-template-columns:minmax(270px,.75fr) minmax(0,1.25fr);gap:17px}.score-topic-list{display:grid;gap:7px}.score-topic-row,.delivery-list-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid transparent;background:transparent;border-radius:999px;padding:11px 12px;text-align:left;color:var(--dark);transition:.15s}.score-topic-row:hover,.score-topic-row.active,.delivery-list-row:hover,.delivery-list-row.active{border-color:var(--soft-pink);background:var(--light-pink)}.score-topic-row span,.delivery-list-row span{min-width:0;display:grid;gap:3px}.score-topic-row strong,.delivery-list-row strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.score-topic-row small,.delivery-list-row small{font-size:10px;color:var(--gray);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.score-topic-row em,.delivery-list-row em{font-size:10px;font-style:normal;white-space:nowrap;color:var(--medium)}.score-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.score-input{border:1px solid var(--line);border-radius:14px;padding:10px;background:#fffdfa}.score-input label{display:flex;justify-content:space-between;gap:4px;font-size:11px;font-weight:800}.score-input label span{font-weight:500;color:var(--gray)}.score-input input{margin-top:8px;width:100%;text-align:center;border:1px solid var(--line);border-radius:999px;padding:8px;background:white}.score-input small{display:block;color:var(--gray);font-size:10px;line-height:1.45;margin-top:7px}.score-summary{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:var(--cream);border-radius:13px;padding:11px 13px;color:var(--medium);font-size:11px}.score-summary strong{font-size:19px;color:var(--dark)}.score-summary span:last-child{color:var(--gray)}.workflow-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(285px,.65fr);gap:18px}.workflow-layout>aside{display:grid;gap:17px;align-content:start}.workflow-task-list,.delivery-list{display:grid;gap:6px}.workflow-task{width:100%;display:grid;grid-template-columns:30px 1fr;gap:10px;text-align:left;border:1px solid transparent;background:transparent;border-radius:999px;padding:9px;color:var(--dark)}.workflow-task:hover{background:#faf5ef;border-color:var(--line)}.workflow-task.completed{background:var(--light-sage)}.task-check{width:25px;height:25px;display:grid;place-items:center;border-radius:50%;background:#eee9e1;color:var(--medium);font-weight:800;font-size:11px}.workflow-task.completed .task-check{background:var(--sage);color:white}.workflow-task span:last-child{display:grid;gap:2px}.workflow-task strong{font-size:11px}.workflow-task small{font-size:10px;color:var(--gray)}.delivery-editor{display:grid;gap:17px;margin-top:17px}.delivery-fields{display:grid;grid-template-columns:repeat(5,1fr);gap:9px}.delivery-field{display:grid;gap:6px}.delivery-field label{font-size:11px;color:var(--medium);font-weight:800}.delivery-field textarea,.carousel-page textarea,.platform-version textarea{width:100%;min-height:128px;border:1px solid var(--line);border-radius:14px;padding:10px;background:#fff;resize:vertical;color:var(--dark);font-size:12px}.carousel-pages{display:grid;gap:8px}.carousel-page{border:1px solid var(--line);border-radius:14px;padding:11px;background:#fffdfa}.carousel-page-head{display:grid;grid-template-columns:40px auto 1fr;align-items:baseline;gap:7px;margin-bottom:7px}.carousel-page-head>span{color:var(--pink);font-size:11px;font-weight:800}.carousel-page-head strong{font-size:12px}.carousel-page-head small{color:var(--gray);font-size:10px}.carousel-page textarea{min-height:74px}.platform-versions{display:grid;grid-template-columns:repeat(2,1fr);gap:11px}.platform-version{display:grid;gap:6px;border:1px solid var(--line);border-radius:14px;padding:12px;background:#fffdfa}.platform-version-head{display:flex;align-items:center;justify-content:space-between}.platform-version-head strong{font-size:13px}.platform-version>small{color:var(--gray);font-size:10px}.platform-version textarea{min-height:180px}.shot-table{display:grid;gap:4px;overflow:auto}.shot-row{display:grid;grid-template-columns:42px repeat(4,minmax(120px,1fr));gap:5px;align-items:center}.shot-row span{font-size:11px;color:var(--pink);font-weight:800;text-align:center}.shot-row input{width:100%;border:1px solid var(--line);border-radius:999px;padding:8px 9px;color:var(--dark);font-size:11px;background:#fff}.shot-head{padding:0 0 5px;border-bottom:1px solid var(--line)}.shot-head span{color:var(--gray);font-size:10px}.review-list{display:grid;gap:9px;max-height:640px;overflow:auto}.review-card{border:1px solid var(--line);border-radius:14px;padding:13px;background:#fffdfa}.review-card-head{display:flex;align-items:start;justify-content:space-between;gap:10px}.review-card-head>div{display:grid;gap:3px;min-width:0}.review-card-head strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.review-card-head small{font-size:10px;color:var(--gray)}.review-metrics{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}.review-metrics span{background:var(--cream);border-radius:999px;padding:5px 8px;font-size:10px;color:var(--gray)}.review-metrics b{color:var(--dark);margin-left:3px}.review-card p{font-size:11px;color:var(--medium);margin:5px 0}.review-card p strong{color:var(--dark)}
+    .mobile-nav{overflow-x:auto;justify-content:flex-start;gap:4px;padding:0 7px}.mobile-nav a{flex:0 0 58px}.mobile-nav a span{font-size:16px}
+    @media(max-width:1120px){.pillar-grid,.delivery-fields{grid-template-columns:1fr 1fr}.workflow-layout,.scoring-layout{grid-template-columns:1fr}.score-grid{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:760px){.pillar-grid,.delivery-fields,.platform-versions{grid-template-columns:1fr}.score-grid{grid-template-columns:repeat(2,1fr)}.workflow-layout{display:block}.workflow-layout>aside{margin-top:17px}.carousel-page-head{grid-template-columns:38px 1fr}.carousel-page-head small{grid-column:2}.shot-row{grid-template-columns:30px repeat(4,minmax(130px,1fr));min-width:680px}.shot-table{overflow-x:auto}.workflow-progress>div:first-child{align-items:start;flex-direction:column;gap:3px}}
+  </style>`);
+  document.head.insertAdjacentHTML('beforeend', `<style id="workflow-summary-style">.tag.sage{background:var(--light-sage);color:#557057}.workflow-summary{margin-top:18px}.workflow-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.workflow-summary-grid button{display:grid;gap:4px;text-align:left;border:1px solid var(--line);background:#fffdfa;border-radius:14px;padding:12px;color:var(--dark)}.workflow-summary-grid button:hover{border-color:var(--soft-pink);background:var(--light-pink)}.workflow-summary-grid strong{font-size:12px}.workflow-summary-grid small{font-size:10px;color:var(--gray)}@media(max-width:760px){.workflow-summary-grid{grid-template-columns:1fr 1fr}}</style>`);
+
+  // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。
+  enhancedRender();
+})();
