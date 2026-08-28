@@ -4,7 +4,7 @@
  * 部署前請複製 supabase-config.example.js，填入 Supabase URL 與 publishable/anon key。
  */
 window.SUPABASE_CONFIG = Object.freeze({
-  url: '',
-  anonKey: '',
+  url: 'https://ipokersuzsdypngnhipz.supabase.co',
+  anonKey: 'sb_publishable_M34VsX663k8k94Tx8WQDMw_ZvhxPo8T',
   apiBase: ''
 });

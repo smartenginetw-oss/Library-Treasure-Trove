@@ -7,6 +7,7 @@ create extension if not exists pgcrypto;
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = timezone('utc', now());
@@ -18,6 +19,7 @@ create or replace function public.is_admin()
 returns boolean
 language sql
 stable
+set search_path = public
 as $$
   select coalesce((select (auth.jwt() -> 'app_metadata' ->> 'role') = 'admin'), false);
 $$;
@@ -135,6 +137,7 @@ create trigger viral_analyses_updated_at before update on public.viral_analyses 
 create index if not exists topics_user_updated_idx on public.topics (user_id, updated_at desc);
 create index if not exists formulas_user_updated_idx on public.formulas (user_id, updated_at desc);
 create index if not exists viral_contents_active_idx on public.viral_contents (archived, created_at desc);
+create index if not exists viral_contents_created_by_idx on public.viral_contents (created_by);
 create index if not exists viral_analyses_user_idx on public.viral_analyses (user_id, created_at desc);
 
 -- Exposed public schema: revoke default broad access, then grant only intended operations.
