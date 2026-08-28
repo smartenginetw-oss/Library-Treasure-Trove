@@ -178,6 +178,153 @@
     return `<div class="form-field ${options.full ? 'full' : ''}"><label>${label}</label><${tag} name="${name}" ${attrs}${valueAttr}${placeholder}>${content}</${tag}></div>`;
   }
 
+  function localDateTimeValue(value = new Date()) {
+    const dateValue = value instanceof Date ? value : new Date(value);
+    const dateToUse = Number.isNaN(dateValue.getTime()) ? new Date() : dateValue;
+    const pad = number => String(number).padStart(2, '0');
+    return `${dateToUse.getFullYear()}-${pad(dateToUse.getMonth() + 1)}-${pad(dateToUse.getDate())}T${pad(dateToUse.getHours())}:${pad(dateToUse.getMinutes())}`;
+  }
+
+  function parseLocalDateTime(value) {
+    const raw = String(value || '').trim();
+    const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (match && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw)) {
+      const localDate = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
+      if (!Number.isNaN(localDate.getTime())) return localDate;
+    }
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }
+
+  function localDateKey(value) {
+    const dateValue = value instanceof Date ? value : parseLocalDateTime(value);
+    const pad = number => String(number).padStart(2, '0');
+    return `${dateValue.getFullYear()}-${pad(dateValue.getMonth() + 1)}-${pad(dateValue.getDate())}`;
+  }
+
+  function localDateTimeLabel(value) {
+    const dateValue = parseLocalDateTime(value);
+    const pad = number => String(number).padStart(2, '0');
+    const hour = dateValue.getHours();
+    const period = hour >= 12 ? '下午' : '上午';
+    const twelveHour = hour % 12 || 12;
+    return `${dateValue.getFullYear()}/${pad(dateValue.getMonth() + 1)}/${pad(dateValue.getDate())} ${period} ${pad(twelveHour)}:${pad(dateValue.getMinutes())}`;
+  }
+
+  function dateTimePickerField(label, name, value, options = {}) {
+    const initialValue = value || localDateTimeValue();
+    return `<div class="form-field ${options.full ? 'full' : ''}"><label>${label}</label><div class="date-time-picker" data-date-time-picker><input type="hidden" name="${name}" value="${escapeHtml(initialValue)}"><button type="button" class="date-time-trigger" aria-haspopup="dialog" aria-expanded="false"><span class="date-time-trigger-label"></span><span class="date-time-trigger-chevron" aria-hidden="true">⌄</span></button><div class="date-time-popover" role="dialog" aria-label="選擇${label}" hidden><div class="date-time-calendar"><div class="date-time-calendar-head"><button type="button" class="date-time-nav" data-date-prev aria-label="上一個月">‹</button><strong data-date-title></strong><button type="button" class="date-time-nav" data-date-next aria-label="下一個月">›</button></div><div class="date-time-weekdays" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div class="date-time-days" data-date-days role="grid"></div><button type="button" class="date-time-today" data-date-today>回到今天</button></div><div class="date-time-time"><div class="date-time-time-head"><strong>時間</strong><span data-date-time-summary></span></div><div class="date-time-time-controls"><label>小時<input type="number" data-date-hour min="1" max="12" inputmode="numeric" aria-label="小時"></label><span class="date-time-colon">：</span><label>分鐘<input type="number" data-date-minute min="0" max="59" inputmode="numeric" aria-label="分鐘"></label><button type="button" class="date-time-period" data-date-period aria-label="切換上午或下午"></button></div><p>以台北時間顯示，套用後會轉成標準時間保存。</p></div><div class="date-time-popover-actions"><button type="button" class="btn tiny" data-date-cancel>取消</button><button type="button" class="btn primary tiny" data-date-confirm>套用時間</button></div></div></div></div>`;
+  }
+
+  function enhanceDateTimePickers() {
+    document.querySelectorAll('[data-date-time-picker]:not([data-enhanced])').forEach(picker => {
+      picker.dataset.enhanced = 'true';
+      const hidden = picker.querySelector('input[type="hidden"]');
+      const trigger = picker.querySelector('.date-time-trigger');
+      const triggerLabel = picker.querySelector('.date-time-trigger-label');
+      const popover = picker.querySelector('.date-time-popover');
+      const title = picker.querySelector('[data-date-title]');
+      const days = picker.querySelector('[data-date-days]');
+      const hourInput = picker.querySelector('[data-date-hour]');
+      const minuteInput = picker.querySelector('[data-date-minute]');
+      const periodButton = picker.querySelector('[data-date-period]');
+      const timeSummary = picker.querySelector('[data-date-time-summary]');
+      if (!hidden || !trigger || !popover || !days) return;
+
+      const selectedDate = () => parseLocalDateTime(hidden.value || localDateTimeValue());
+      const model = { draft: selectedDate(), viewMonth: new Date(selectedDate().getFullYear(), selectedDate().getMonth(), 1) };
+      const close = () => {
+        popover.hidden = true;
+        popover.classList.remove('above');
+        trigger.setAttribute('aria-expanded', 'false');
+      };
+      const position = () => {
+        if (popover.hidden) return;
+        popover.classList.remove('above');
+        const rect = trigger.getBoundingClientRect();
+        const availableBelow = window.innerHeight - rect.bottom - 12;
+        if (availableBelow < popover.offsetHeight && rect.top > popover.offsetHeight + 12) popover.classList.add('above');
+      };
+      const syncTrigger = () => {
+        triggerLabel.textContent = localDateTimeLabel(hidden.value || localDateTimeValue());
+      };
+      const syncTime = () => {
+        const hours = model.draft.getHours();
+        hourInput.value = String(hours % 12 || 12).padStart(2, '0');
+        minuteInput.value = String(model.draft.getMinutes()).padStart(2, '0');
+        periodButton.textContent = hours >= 12 ? '下午' : '上午';
+        timeSummary.textContent = `${periodButton.textContent} ${hourInput.value}:${minuteInput.value}`;
+      };
+      const renderDays = () => {
+        const year = model.viewMonth.getFullYear();
+        const month = model.viewMonth.getMonth();
+        title.textContent = `${year} 年 ${month + 1} 月`;
+        const firstDay = new Date(year, month, 1).getDay();
+        const todayKey = localDateKey(new Date());
+        const selectedKey = localDateKey(model.draft);
+        const cells = [];
+        for (let index = 0; index < 42; index += 1) {
+          const dayDate = new Date(year, month, index - firstDay + 1);
+          const dayKey = localDateKey(dayDate);
+          const outside = dayDate.getMonth() !== month;
+          const selected = dayKey === selectedKey;
+          const today = dayKey === todayKey;
+          cells.push(`<button type="button" class="date-time-day${outside ? ' outside' : ''}${selected ? ' selected' : ''}${today ? ' today' : ''}" data-date-day="${dayKey}" role="gridcell" aria-selected="${selected}">${dayDate.getDate()}</button>`);
+        }
+        days.innerHTML = cells.join('');
+        syncTime();
+      };
+      const setDraftDate = dateValue => {
+        model.draft.setFullYear(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate());
+        model.viewMonth = new Date(dateValue.getFullYear(), dateValue.getMonth(), 1);
+        renderDays();
+      };
+      const setDraftTime = () => {
+        let hours = Math.max(1, Math.min(12, Number(hourInput.value) || 12));
+        const minutes = Math.max(0, Math.min(59, Number(minuteInput.value) || 0));
+        const period = periodButton.textContent === '下午' ? 12 : 0;
+        hours = (hours % 12) + period;
+        model.draft.setHours(hours, minutes, 0, 0);
+        syncTime();
+      };
+      const open = () => {
+        model.draft = selectedDate();
+        model.viewMonth = new Date(model.draft.getFullYear(), model.draft.getMonth(), 1);
+        renderDays();
+        popover.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+        requestAnimationFrame(position);
+      };
+
+      syncTrigger();
+      trigger.addEventListener('click', () => (popover.hidden ? open() : close()));
+      picker.querySelector('[data-date-prev]').addEventListener('click', () => { model.viewMonth.setMonth(model.viewMonth.getMonth() - 1); renderDays(); });
+      picker.querySelector('[data-date-next]').addEventListener('click', () => { model.viewMonth.setMonth(model.viewMonth.getMonth() + 1); renderDays(); });
+      picker.querySelector('[data-date-today]').addEventListener('click', () => { model.draft = new Date(); model.viewMonth = new Date(model.draft.getFullYear(), model.draft.getMonth(), 1); renderDays(); });
+      days.addEventListener('click', event => {
+        const button = event.target.closest('[data-date-day]');
+        if (!button) return;
+        const [year, month, day] = button.dataset.dateDay.split('-').map(Number);
+        setDraftDate(new Date(year, month - 1, day));
+      });
+      hourInput.addEventListener('change', setDraftTime);
+      minuteInput.addEventListener('change', setDraftTime);
+      periodButton.addEventListener('click', () => { periodButton.textContent = periodButton.textContent === '下午' ? '上午' : '下午'; setDraftTime(); });
+      picker.querySelector('[data-date-cancel]').addEventListener('click', close);
+      picker.querySelector('[data-date-confirm]').addEventListener('click', () => {
+        hidden.value = localDateTimeValue(model.draft);
+        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+        syncTrigger();
+        close();
+        trigger.focus();
+      });
+      document.addEventListener('mousedown', event => { if (!picker.contains(event.target)) close(); });
+      document.addEventListener('keydown', event => { if (event.key === 'Escape' && !popover.hidden) { close(); trigger.focus(); } });
+      window.addEventListener('resize', position);
+      window.addEventListener('scroll', position, true);
+    });
+  }
+
   function positioning() {
     const profile = state.profile;
     const completion = workflowProfileComplete(profile);
@@ -500,7 +647,8 @@
       return `<article class="review-card"><div class="review-card-head"><div><strong>${escapeHtml(topic?.title || review.topicTitle || '已移除題目')}</strong><small>${review.publishedAt ? formatDateTime(review.publishedAt) : '未填發布時間'} · ${reviewDue(review) ? '可以復盤' : `預計 ${formatDateTime(review.reviewDueAt)}`}</small></div><span class="tag ${reviewDue(review) ? 'pink' : 'blue'}">${reviewDue(review) ? '待處理' : '觀察中'}</span></div><div class="review-metrics"><span>觸及 <b>${review.reach ?? '—'}</b></span><span>觀看／停留 <b>${review.watchTime ?? '—'}</b></span><span>收藏 <b>${review.saves ?? '—'}</b></span><span>分享 <b>${review.shares ?? '—'}</b></span><span>留言／私訊 <b>${review.dms ?? '—'}</b></span></div><p><strong>判斷：</strong>${escapeHtml(review.diagnosis || '尚未補上診斷')}</p><p><strong>下一個測試：</strong>${escapeHtml(review.nextTest || '尚未補上')}</p></article>`;
     }).join('');
     const topicSelect = topics.map(topic => `<option value="${escapeHtml(topic.id)}">${escapeHtml(topic.title)}</option>`).join('');
-    layout('復盤實驗', '復盤實驗 ／ 發布後 48–72 小時只測一個變因', '復盤不是判斷好或壞，而是把觸及、停留、收藏、分享、留言／私訊轉成下一個具體改動。沒有實際數據時，先留白，不讓系統替你猜。', `<div class="grid-2"><section class="panel"><div class="section-head"><div><h2>新增一筆復盤</h2><p>發布時間會預設在今天；可直接改成實際時間。</p></div></div><form onsubmit="saveReview(event)"><div class="form-grid"><div class="form-field full"><label>對應題目</label><select name="topicId">${topicSelect || '<option value="">尚未有題目</option>'}</select></div>${field('發布時間', 'publishedAt', new Date().toISOString().slice(0, 16), { attrs: 'type="datetime-local"' })}${field('觸及／曝光', 'reach', '', { attrs: 'type="number" min="0" placeholder="實際數字"' })}${field('觀看或平均停留', 'watchTime', '', { placeholder: '例如：平均 8 秒' })}${field('收藏', 'saves', '', { attrs: 'type="number" min="0"' })}${field('分享', 'shares', '', { attrs: 'type="number" min="0"' })}${field('留言／私訊', 'dms', '', { attrs: 'type="number" min="0"' })}${field('本次只測的變因', 'variable', '', { full: true, placeholder: '例如：只改封面第一句，其他保持一致' })}${field('數據判斷', 'diagnosis', '', { tag: 'textarea', full: true, placeholder: '觸及低、開頭滑走、收藏少或 CTA 斷掉？寫出證據。' })}${field('下一個具體測試', 'nextTest', '', { tag: 'textarea', full: true, placeholder: '下一篇只改哪一件事？' })}</div><div class="form-actions"><button class="btn primary" ${topics.length ? '' : 'disabled'}>儲存復盤並排程</button></div></form><div class="notice">系統會以發布時間＋48 小時建立復盤時間；建議在 48–72 小時之間實際查看平台洞察。</div></section><section class="panel"><div class="section-head"><div><h2>待處理復盤</h2><p>${due.length} 筆已到時間</p></div><button type="button" class="btn tiny" onclick="copyText('48–72 小時復盤提醒：回到藏書閣記錄觸及、停留、收藏、分享、留言／私訊，並只決定下一個測試變因。')">複製提醒</button></div><div class="review-list">${rows || '<div class="empty"><strong>還沒有復盤紀錄</strong>發布第一支內容後回來填寫。</div>'}</div></section></div>`);
+    layout('復盤實驗', '復盤實驗 ／ 發布後 48–72 小時只測一個變因', '復盤不是判斷好或壞，而是把觸及、停留、收藏、分享、留言／私訊轉成下一個具體改動。沒有實際數據時，先留白，不讓系統替你猜。', `<div class="grid-2"><section class="panel"><div class="section-head"><div><h2>新增一筆復盤</h2><p>發布時間會預設在今天；可直接改成實際時間。</p></div></div><form onsubmit="saveReview(event)"><div class="form-grid"><div class="form-field full"><label>對應題目</label><select name="topicId">${topicSelect || '<option value="">尚未有題目</option>'}</select></div>${dateTimePickerField('發布時間', 'publishedAt', localDateTimeValue())}${field('觸及／曝光', 'reach', '', { attrs: 'type="number" min="0" placeholder="實際數字"' })}${field('觀看或平均停留', 'watchTime', '', { placeholder: '例如：平均 8 秒' })}${field('收藏', 'saves', '', { attrs: 'type="number" min="0"' })}${field('分享', 'shares', '', { attrs: 'type="number" min="0"' })}${field('留言／私訊', 'dms', '', { attrs: 'type="number" min="0"' })}${field('本次只測的變因', 'variable', '', { full: true, placeholder: '例如：只改封面第一句，其他保持一致' })}${field('數據判斷', 'diagnosis', '', { tag: 'textarea', full: true, placeholder: '觸及低、開頭滑走、收藏少或 CTA 斷掉？寫出證據。' })}${field('下一個具體測試', 'nextTest', '', { tag: 'textarea', full: true, placeholder: '下一篇只改哪一件事？' })}</div><div class="form-actions"><button class="btn primary" ${topics.length ? '' : 'disabled'}>儲存復盤並排程</button></div></form><div class="notice">系統會以發布時間＋48 小時建立復盤時間；建議在 48–72 小時之間實際查看平台洞察。</div></section><section class="panel"><div class="section-head"><div><h2>待處理復盤</h2><p>${due.length} 筆已到時間</p></div><button type="button" class="btn tiny" onclick="copyText('48–72 小時復盤提醒：回到藏書閣記錄觸及、停留、收藏、分享、留言／私訊，並只決定下一個測試變因。')">複製提醒</button></div><div class="review-list">${rows || '<div class="empty"><strong>還沒有復盤紀錄</strong>發布第一支內容後回來填寫。</div>'}</div></section></div>`);
+    enhanceDateTimePickers();
   }
 
   function saveReview(event) {
@@ -644,6 +792,11 @@
     @media(max-width:760px){.pillar-grid,.delivery-fields,.platform-versions{grid-template-columns:1fr}.score-grid{grid-template-columns:repeat(2,1fr)}.workflow-layout{display:block}.workflow-layout>aside{margin-top:17px}.carousel-page-head{grid-template-columns:38px 1fr}.carousel-page-head small{grid-column:2}.shot-row{grid-template-columns:30px repeat(4,minmax(130px,1fr));min-width:680px}.shot-table{overflow-x:auto}.workflow-progress>div:first-child{align-items:start;flex-direction:column;gap:3px}}
   </style>`);
   document.head.insertAdjacentHTML('beforeend', `<style id="workflow-summary-style">.tag.sage{background:var(--light-sage);color:#557057}.workflow-summary{margin-top:18px}.workflow-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.workflow-summary-grid button{display:grid;gap:4px;text-align:left;border:1px solid var(--line);background:#fffdfa;border-radius:14px;padding:12px;color:var(--dark)}.workflow-summary-grid button:hover{border-color:var(--soft-pink);background:var(--light-pink)}.workflow-summary-grid strong{font-size:12px}.workflow-summary-grid small{font-size:10px;color:var(--gray)}@media(max-width:760px){.workflow-summary-grid{grid-template-columns:1fr 1fr}}</style>`);
+
+  document.head.insertAdjacentHTML('beforeend', `<style id="date-time-picker-style">
+    .date-time-picker{position:relative;width:100%}.date-time-trigger{width:100%;min-height:42px;padding:9px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--dark);font-weight:500;text-align:left;transition:border-color .16s,box-shadow .16s}.date-time-trigger:hover,.date-time-trigger[aria-expanded="true"]{border-color:var(--pink);box-shadow:0 0 0 3px rgba(201,147,138,.12)}.date-time-trigger-chevron{color:var(--gray);font-size:1.1rem;line-height:1;transition:transform .16s}.date-time-trigger[aria-expanded="true"] .date-time-trigger-chevron{transform:rotate(180deg)}.date-time-popover{position:absolute;left:0;top:calc(100% + 9px);z-index:100;width:min(460px,calc(100vw - 32px));display:grid;grid-template-columns:minmax(0,1.1fr) minmax(170px,.9fr);gap:0;padding:14px;background:var(--paper);border:1px solid var(--line);border-radius:22px;box-shadow:0 18px 42px rgba(48,38,31,.18);color:var(--dark)}.date-time-popover[hidden]{display:none!important}.date-time-popover.above{top:auto;bottom:calc(100% + 9px)}.date-time-calendar{min-width:0;padding-right:14px}.date-time-calendar-head{display:grid;grid-template-columns:34px 1fr 34px;align-items:center;gap:7px;margin-bottom:12px}.date-time-calendar-head strong{text-align:center;font-size:13px}.date-time-nav,.date-time-today,.date-time-period{border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--medium);font-weight:700}.date-time-nav{width:32px;height:32px;padding:0;font-size:20px;line-height:1}.date-time-nav:hover,.date-time-today:hover,.date-time-period:hover{border-color:var(--pink);color:var(--pink);background:var(--cream)}.date-time-weekdays,.date-time-days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}.date-time-weekdays{margin-bottom:5px;color:var(--gray);font-size:10px;font-weight:700}.date-time-day{width:32px;height:32px;justify-self:center;padding:0;border:1px solid transparent;border-radius:999px;background:transparent;color:var(--dark);font-size:11px}.date-time-day:hover,.date-time-day:focus-visible{border-color:var(--soft-pink);background:var(--light-pink);outline:none}.date-time-day.outside{color:#c4beb5}.date-time-day.today{border-color:var(--soft-blue);color:var(--blue);font-weight:800}.date-time-day.selected{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:800;box-shadow:0 3px 7px rgba(122,155,173,.24)}.date-time-today{display:block;margin:10px auto 0;padding:6px 12px;font-size:10px}.date-time-time{display:grid;align-content:start;gap:12px;padding-left:14px;border-left:1px solid var(--line)}.date-time-time-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.date-time-time-head strong{font-size:13px}.date-time-time-head span{color:var(--gray);font-size:10px}.date-time-time-controls{display:grid;grid-template-columns:minmax(54px,1fr) auto minmax(54px,1fr);align-items:end;gap:5px}.date-time-time-controls label{display:grid;gap:5px;color:var(--gray);font-size:10px;font-weight:700}.date-time-time-controls input{width:100%;min-width:0;border:1px solid var(--line);border-radius:999px;padding:8px 6px;background:#fff;color:var(--dark);text-align:center;font-size:13px}.date-time-time-controls input:focus{border-color:var(--pink);outline:0;box-shadow:0 0 0 3px rgba(201,147,138,.12)}.date-time-colon{align-self:end;padding-bottom:8px;color:var(--gray);font-weight:800}.date-time-period{min-height:36px;padding:7px 10px;grid-column:1/-1;background:var(--light-blue);border-color:var(--soft-blue);color:#537184}.date-time-time p{margin:0;color:var(--gray);font-size:10px;line-height:1.55}.date-time-popover-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:7px;padding-top:12px;margin-top:2px;border-top:1px solid var(--line)}
+    @media(max-width:760px){.date-time-popover{grid-template-columns:1fr;width:min(100%,calc(100vw - 32px));max-height:calc(100vh - 24px);overflow:auto}.date-time-calendar{padding:0 0 14px}.date-time-time{padding:14px 0 0;border-left:0;border-top:1px solid var(--line)}}
+  </style>`);
 
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。
   enhancedRender();
