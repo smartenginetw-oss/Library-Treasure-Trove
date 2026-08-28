@@ -791,19 +791,10 @@
           button.setAttribute('aria-pressed', String(active));
         });
         summary.replaceChildren();
-        if (!selected.length) {
-          const empty = document.createElement('span');
-          empty.className = 'multi-select-empty';
-          empty.textContent = '尚未選擇平台';
-          summary.appendChild(empty);
-          return;
-        }
-        selected.forEach(({ value }) => {
-          const chip = document.createElement('span');
-          chip.className = 'multi-select-selected';
-          chip.textContent = platformLabel(value);
-          summary.appendChild(chip);
-        });
+        const count = document.createElement('span');
+        count.className = selected.length ? 'multi-select-summary-count' : 'multi-select-empty';
+        count.textContent = selected.length ? `已選 ${selected.length} 個平台` : '尚未選擇平台';
+        summary.appendChild(count);
       };
       select.addEventListener('change', sync);
       wrap.append(helper, summary, options);
@@ -894,7 +885,7 @@
   </style>`);
 
   document.head.insertAdjacentHTML('beforeend', `<style id="multi-select-picker-style">
-    .multi-select-picker{position:relative;display:grid;gap:9px}.multi-select-picker select{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;overflow:hidden!important}.multi-select-helper{font-size:10px;color:var(--gray)}.multi-select-summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-height:30px}.multi-select-selected,.multi-select-empty{display:inline-flex;align-items:center;min-height:27px;padding:5px 10px;border-radius:999px;font-size:10px;font-weight:700}.multi-select-selected{background:var(--light-blue);color:#537184}.multi-select-empty{border:1px dashed #d6d0c5;color:var(--gray)}.multi-select-options{display:flex;flex-wrap:wrap;gap:7px}.multi-select-option{border:1px solid var(--line);background:#fffefa;color:var(--medium);padding:8px 12px;border-radius:999px;font-size:11px;font-weight:700;transition:background .16s,border-color .16s,color .16s,transform .16s}.multi-select-option:hover,.multi-select-option:focus-visible{border-color:var(--pink);color:var(--pink);background:var(--cream);outline:none}.multi-select-option.selected{border-color:var(--soft-blue);background:var(--light-blue);color:#537184;box-shadow:0 0 0 2px rgba(184,207,218,.2)}
+    .multi-select-picker{position:relative;display:grid;gap:9px}.multi-select-picker select{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;overflow:hidden!important}.multi-select-helper{font-size:10px;color:var(--gray)}.multi-select-summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-height:30px}.multi-select-summary-count{font-size:10px;color:var(--gray);font-weight:700}.multi-select-selected,.multi-select-empty{display:inline-flex;align-items:center;min-height:27px;padding:5px 10px;border-radius:999px;font-size:10px;font-weight:700}.multi-select-selected{background:var(--light-blue);color:#537184}.multi-select-empty{border:1px dashed #d6d0c5;color:var(--gray)}.multi-select-options{display:flex;flex-wrap:wrap;gap:7px}.multi-select-option{border:1px solid var(--line);background:#fffefa;color:var(--medium);padding:8px 12px;border-radius:999px;font-size:11px;font-weight:700;transition:background .16s,border-color .16s,color .16s,transform .16s}.multi-select-option:hover,.multi-select-option:focus-visible{border-color:var(--pink);color:var(--pink);background:var(--cream);outline:none}.multi-select-option.selected{border-color:var(--soft-blue);background:var(--light-blue);color:#537184;box-shadow:0 0 0 2px rgba(184,207,218,.2)}
   </style>`);
 
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。
