@@ -3,6 +3,7 @@ import { json, methodNotAllowed, readJson, setJsonHeaders, stringArray, stringVa
 
 export function viralRow(body, userId) {
   const number = key => Number.isFinite(Number(body[key])) ? Math.max(0, Math.round(Number(body[key]))) : null;
+  const durationSeconds = Number.isFinite(Number(body.durationSeconds)) ? Math.max(0, Math.min(86400, Math.round(Number(body.durationSeconds)))) : null;
   const score = (key, fallback) => Number.isFinite(Number(body[key])) ? Math.max(0, Math.min(100, Number(body[key]))) : fallback;
   return {
     id: stringValue(body.id, 120) || `v_${crypto.randomUUID()}`,
@@ -15,6 +16,9 @@ export function viralRow(body, userId) {
     views: number('views'),
     likes: number('likes'),
     comments: number('comments'),
+    duration_seconds: durationSeconds,
+    reposts: number('reposts'),
+    shares: number('shares'),
     velocity: score('velocity', 60),
     freshness: score('freshness', 70),
     repeated_format: score('repeatedFormat', 60),
