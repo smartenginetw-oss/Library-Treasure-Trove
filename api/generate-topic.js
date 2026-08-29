@@ -59,7 +59,9 @@ function validateOutput(value, sourceTitle) {
   const stringFields = ['title', 'targetAudience', 'contentTheme', 'hook', 'hookType', 'whyItWorks', 'cta', 'differentiation', 'copyingRisk', 'angle'];
   if (stringFields.some(key => typeof value[key] !== 'string')) throw Object.assign(new Error('智慧服務的文字欄位格式無效'), { code: 'AI_INVALID_OUTPUT', status: 502 });
   if (sourceTitle && value.title.trim() === sourceTitle.trim()) throw Object.assign(new Error('產生結果不可直接複製來源標題'), { code: 'AI_COPYING_GUARD', status: 422 });
-  if (!Array.isArray(value.contentStructure) || value.contentStructure.length < 3 || !Array.isArray(value.seriesIdeas) || value.seriesIdeas.length < 3) throw Object.assign(new Error('產生結果的結構或系列延伸不足'), { code: 'AI_INVALID_OUTPUT', status: 502 });
+  if (!Array.isArray(value.trafficCodes) || value.trafficCodes.length < 1 || value.trafficCodes.length > 3 || value.trafficCodes.some(item => typeof item !== 'string')) throw Object.assign(new Error('產生結果的流量密碼格式無效'), { code: 'AI_INVALID_OUTPUT', status: 502 });
+  if (!Array.isArray(value.contentStructure) || value.contentStructure.length < 3 || value.contentStructure.length > 8 || value.contentStructure.some(item => typeof item !== 'string')) throw Object.assign(new Error('產生結果的內容結構格式無效'), { code: 'AI_INVALID_OUTPUT', status: 502 });
+  if (!Array.isArray(value.seriesIdeas) || value.seriesIdeas.length < 3 || value.seriesIdeas.length > 6 || value.seriesIdeas.some(item => typeof item !== 'string')) throw Object.assign(new Error('產生結果的系列延伸格式無效'), { code: 'AI_INVALID_OUTPUT', status: 502 });
   if (!allowedAngles.has(String(value.angle).trim())) throw Object.assign(new Error('產生結果的內容切角不在允許清單'), { code: 'AI_INVALID_OUTPUT', status: 502 });
   return {
     ...value,

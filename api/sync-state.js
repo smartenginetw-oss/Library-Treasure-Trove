@@ -161,6 +161,8 @@ export default async function handler(req, res) {
     const deliverables = hasDeliverables ? body.deliverables.slice(0, maxPayload) : [];
     const reviews = hasReviews ? body.reviews.slice(0, maxPayload) : [];
     const workflowTasks = hasWorkflowTasks ? body.workflowTasks.slice(0, 20) : [];
+    const topicRows = topics.map(item => topicRow(item, user.id));
+    const formulaRows = formulas.map(item => formulaRow(item, user.id));
     const deliverableRows = deliverables.map(item => deliverableRow(item, user.id));
     const reviewRows = reviews.map(item => reviewRow(item, user.id));
     const workflowTaskRows = workflowTasks.map(item => workflowTaskRow(item, user.id));
@@ -169,19 +171,19 @@ export default async function handler(req, res) {
     const profileResult = await client.from('creator_profiles').upsert(profile);
     if (profileResult.error) throw Object.assign(new Error('創作者設定同步失敗'), { code: 'PROFILE_SYNC_ERROR', status: 502 });
     if (topics.length) {
-      const result = await client.from('topics').upsert(topics.map(topic => topicRow(topic, user.id)));
+      const result = await client.from('topics').upsert(topicRows);
       if (result.error) throw Object.assign(new Error('選題同步失敗'), { code: 'TOPIC_SYNC_ERROR', status: 502 });
     }
     if (hasTopics && body.topics.length <= maxPayload) {
-      const result = await removeMissingRows(client, 'topics', topics.map(topic => topicRow(topic, user.id)), user.id);
+      const result = await removeMissingRows(client, 'topics', topicRows, user.id);
       if (result.error) throw Object.assign(new Error('已刪除的選題同步失敗'), { code: 'TOPIC_DELETE_SYNC_ERROR', status: 502 });
     }
     if (formulas.length) {
-      const result = await client.from('formulas').upsert(formulas.map(formula => formulaRow(formula, user.id)));
+      const result = await client.from('formulas').upsert(formulaRows);
       if (result.error) throw Object.assign(new Error('公式同步失敗'), { code: 'FORMULA_SYNC_ERROR', status: 502 });
     }
     if (hasFormulas && body.formulas.length <= maxPayload) {
-      const result = await removeMissingRows(client, 'formulas', formulas.map(formula => formulaRow(formula, user.id)), user.id);
+      const result = await removeMissingRows(client, 'formulas', formulaRows, user.id);
       if (result.error) throw Object.assign(new Error('已刪除的公式同步失敗'), { code: 'FORMULA_DELETE_SYNC_ERROR', status: 502 });
     }
     if (deliverables.length) {

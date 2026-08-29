@@ -245,6 +245,8 @@
       const periodButton = picker.querySelector('[data-date-period]');
       const timeSummary = picker.querySelector('[data-date-time-summary]');
       if (!hidden || !trigger || !popover || !days) return;
+      // 舊版或瀏覽器回填可能留下空的 hidden value；顯示的預設時間也必須真正送進表單。
+      if (!hidden.value) hidden.value = localDateTimeValue();
 
       const selectedDate = () => parseLocalDateTime(hidden.value || localDateTimeValue());
       const model = { draft: selectedDate(), viewMonth: new Date(selectedDate().getFullYear(), selectedDate().getMonth(), 1) };
@@ -676,18 +678,20 @@
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const topic = selectedTopic(values.topicId);
-    const publishedAt = values.publishedAt ? new Date(values.publishedAt).toISOString() : new Date().toISOString();
+    const publishedDate = parseLocalDateTime(values.publishedAt);
+    const publishedAt = publishedDate.toISOString();
+    const metric = value => value === '' || value === undefined ? null : Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))) : null;
     const review = {
       id: uid('r'),
       topicId: topic?.id || values.topicId || '',
       topicTitle: topic?.title || '',
       publishedAt,
       reviewDueAt: new Date(new Date(publishedAt).getTime() + 48 * 60 * 60 * 1000).toISOString(),
-      reach: values.reach === '' ? null : Number(values.reach),
+      reach: metric(values.reach),
       watchTime: String(values.watchTime || '').trim(),
-      saves: values.saves === '' ? null : Number(values.saves),
-      shares: values.shares === '' ? null : Number(values.shares),
-      dms: values.dms === '' ? null : Number(values.dms),
+      saves: metric(values.saves),
+      shares: metric(values.shares),
+      dms: metric(values.dms),
       variable: String(values.variable || '').trim(),
       diagnosis: String(values.diagnosis || '').trim(),
       nextTest: String(values.nextTest || '').trim(),
@@ -862,9 +866,10 @@
     const legacyMergeCloudState = window.__bookVault.mergeCloudState;
     window.__bookVault.mergeCloudState = remote => {
       legacyMergeCloudState(remote);
-      if (Array.isArray(remote?.deliverables) && remote.deliverables.length) state.deliverables = remote.deliverables;
-      if (Array.isArray(remote?.reviews) && remote.reviews.length) state.reviews = remote.reviews;
-      if (Array.isArray(remote?.workflowTasks) && remote.workflowTasks.length) state.workflowTasks = remote.workflowTasks;
+      // 遠端空陣列也是有效狀態；不能只在有資料時合併，否則刪除會在換裝置後復活。
+      if (Array.isArray(remote?.deliverables)) state.deliverables = remote.deliverables;
+      if (Array.isArray(remote?.reviews)) state.reviews = remote.reviews;
+      if (Array.isArray(remote?.workflowTasks)) state.workflowTasks = remote.workflowTasks;
       ensureWorkflowState();
       save();
       enhancedRender();
