@@ -126,8 +126,9 @@
     ]);
     const firstError = [profileResult, topicsResult, formulasResult, savedResult, viralsResult, deliverablesResult, reviewsResult, tasksResult].find(result => result.error);
     if (firstError) throw firstError.error;
-    const hasRemoteData = Boolean(profileResult.data || topicsResult.data?.length || formulasResult.data?.length || savedResult.data?.length || viralsResult.data?.length || deliverablesResult.data?.length || reviewsResult.data?.length || tasksResult.data?.length);
-    if (!hasRemoteData) return null;
+    // 公開案例不代表這個帳號已經有雲端資料；新帳號應先上傳本機狀態。
+    const hasRemoteUserData = Boolean(profileResult.data || topicsResult.data?.length || formulasResult.data?.length || savedResult.data?.length || deliverablesResult.data?.length || reviewsResult.data?.length || tasksResult.data?.length);
+    if (!hasRemoteUserData) return null;
     const profile = profileResult.data ? {
       name: profileResult.data.display_name,
       primaryNiche: profileResult.data.primary_niche,

@@ -134,6 +134,15 @@ async function removeMissingRows(client, table, rows, userId) {
   return client.from(table).delete().eq('user_id', userId).in('id', staleIds);
 }
 
+async function removeMissingBookmarks(client, desiredIds, userId) {
+  const existing = await client.from('saved_viral_contents').select('viral_content_id').eq('user_id', userId);
+  if (existing.error) return existing;
+  const desired = new Set(desiredIds);
+  const staleIds = (existing.data || []).map(row => row.viral_content_id).filter(id => !desired.has(id));
+  if (!staleIds.length) return { error: null };
+  return client.from('saved_viral_contents').delete().eq('user_id', userId).in('viral_content_id', staleIds);
+}
+
 export default async function handler(req, res) {
   setJsonHeaders(res, req);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -141,8 +150,11 @@ export default async function handler(req, res) {
   try {
     const { client, user } = await authenticateRequest(req);
     const body = readJson(req);
-    const topics = Array.isArray(body.topics) ? body.topics.slice(0, maxPayload) : [];
-    const formulas = Array.isArray(body.formulas) ? body.formulas.slice(0, maxPayload) : [];
+    const hasTopics = Array.isArray(body.topics);
+    const hasFormulas = Array.isArray(body.formulas);
+    const hasSavedViralIds = Array.isArray(body.savedViralIds);
+    const topics = hasTopics ? body.topics.slice(0, maxPayload) : [];
+    const formulas = hasFormulas ? body.formulas.slice(0, maxPayload) : [];
     const hasDeliverables = Array.isArray(body.deliverables);
     const hasReviews = Array.isArray(body.reviews);
     const hasWorkflowTasks = Array.isArray(body.workflowTasks);
@@ -160,9 +172,17 @@ export default async function handler(req, res) {
       const result = await client.from('topics').upsert(topics.map(topic => topicRow(topic, user.id)));
       if (result.error) throw Object.assign(new Error('選題同步失敗'), { code: 'TOPIC_SYNC_ERROR', status: 502 });
     }
+    if (hasTopics && body.topics.length <= maxPayload) {
+      const result = await removeMissingRows(client, 'topics', topics.map(topic => topicRow(topic, user.id)), user.id);
+      if (result.error) throw Object.assign(new Error('已刪除的選題同步失敗'), { code: 'TOPIC_DELETE_SYNC_ERROR', status: 502 });
+    }
     if (formulas.length) {
       const result = await client.from('formulas').upsert(formulas.map(formula => formulaRow(formula, user.id)));
       if (result.error) throw Object.assign(new Error('公式同步失敗'), { code: 'FORMULA_SYNC_ERROR', status: 502 });
+    }
+    if (hasFormulas && body.formulas.length <= maxPayload) {
+      const result = await removeMissingRows(client, 'formulas', formulas.map(formula => formulaRow(formula, user.id)), user.id);
+      if (result.error) throw Object.assign(new Error('已刪除的公式同步失敗'), { code: 'FORMULA_DELETE_SYNC_ERROR', status: 502 });
     }
     if (deliverables.length) {
       const result = await client.from('content_deliverables').upsert(deliverableRows);
@@ -192,6 +212,10 @@ export default async function handler(req, res) {
     if (desired.length) {
       const result = await client.from('saved_viral_contents').upsert(desired, { onConflict: 'user_id,viral_content_id' });
       if (result.error) throw Object.assign(new Error('收藏案例同步失敗'), { code: 'BOOKMARK_SYNC_ERROR', status: 502 });
+    }
+    if (hasSavedViralIds && body.savedViralIds.length <= maxPayload) {
+      const result = await removeMissingBookmarks(client, savedViralIds, user.id);
+      if (result.error) throw Object.assign(new Error('已取消收藏的案例同步失敗'), { code: 'BOOKMARK_DELETE_SYNC_ERROR', status: 502 });
     }
     return json(res, 200, { ok: true, synced: { profile: true, topics: topics.length, formulas: formulas.length, deliverables: deliverables.length, reviews: reviews.length, workflowTasks: workflowTasks.length, savedViralIds: desired.length } });
   } catch (error) {
