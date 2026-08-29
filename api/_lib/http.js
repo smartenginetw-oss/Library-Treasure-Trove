@@ -1,7 +1,8 @@
 export function setJsonHeaders(res, req) {
   const origin = req?.headers?.origin;
-  const allowedOrigin = process.env.APP_ORIGIN;
-  if (origin && (!allowedOrigin || origin === allowedOrigin)) {
+  const allowedOrigin = String(process.env.APP_ORIGIN || '').trim();
+  // 未設定允許來源時不回傳 ACAO；同源請求不需要 CORS，跨來源請求則應明確設定 APP_ORIGIN。
+  if (origin && allowedOrigin && origin === allowedOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
@@ -21,7 +22,13 @@ export function methodNotAllowed(res, methods = ['POST']) {
 
 export function readJson(req) {
   if (req.body && typeof req.body === 'object') return req.body;
-  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body);
+  if (typeof req.body === 'string' && req.body.trim()) {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      throw Object.assign(new Error('請提供有效的 JSON 內容'), { code: 'INVALID_JSON', status: 400 });
+    }
+  }
   return {};
 }
 

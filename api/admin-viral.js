@@ -1,8 +1,9 @@
 import { authenticateRequest } from './_lib/supabase.js';
 import { json, methodNotAllowed, readJson, setJsonHeaders, stringArray, stringValue } from './_lib/http.js';
 
-function viralRow(body, userId) {
+export function viralRow(body, userId) {
   const number = key => Number.isFinite(Number(body[key])) ? Math.max(0, Math.round(Number(body[key]))) : null;
+  const score = (key, fallback) => Number.isFinite(Number(body[key])) ? Math.max(0, Math.min(100, Number(body[key]))) : fallback;
   return {
     id: stringValue(body.id, 120) || `v_${crypto.randomUUID()}`,
     title: stringValue(body.title, 300),
@@ -14,9 +15,9 @@ function viralRow(body, userId) {
     views: number('views'),
     likes: number('likes'),
     comments: number('comments'),
-    velocity: Number.isFinite(Number(body.velocity)) ? Number(body.velocity) : 60,
-    freshness: Number.isFinite(Number(body.freshness)) ? Number(body.freshness) : 70,
-    repeated_format: Number.isFinite(Number(body.repeatedFormat)) ? Number(body.repeatedFormat) : 60,
+    velocity: score('velocity', 60),
+    freshness: score('freshness', 70),
+    repeated_format: score('repeatedFormat', 60),
     traffic_codes: stringArray(body.trafficCodes || body.code ? (body.trafficCodes || [body.code]) : [], 5, 100),
     hook_type: stringValue(body.hookType, 100),
     cover_type: stringValue(body.coverType, 100),
