@@ -1,4 +1,5 @@
 import { authenticateRequest } from './_lib/supabase.js';
+import { deliverableRow } from './_lib/deliverable.js';
 import { json, methodNotAllowed, readJson, setJsonHeaders, stringArray, stringValue } from './_lib/http.js';
 
 const maxPayload = 200;
@@ -76,18 +77,6 @@ function formulaRow(formula, userId) {
 
 function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
-
-function deliverableRow(deliverable, userId) {
-  return {
-    id: stringValue(deliverable?.id, 120) || `local_${crypto.randomUUID()}`,
-    user_id: userId,
-    topic_id: stringValue(deliverable?.topicId, 120),
-    title: stringValue(deliverable?.title, 300),
-    angle: stringValue(deliverable?.angle, 100),
-    status: ['DRAFT', 'READY', 'ARCHIVED'].includes(deliverable?.status) ? deliverable.status : 'DRAFT',
-    payload: objectValue(deliverable)
-  };
 }
 
 function reviewRow(review, userId) {

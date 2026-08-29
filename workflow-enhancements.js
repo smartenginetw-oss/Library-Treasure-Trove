@@ -44,7 +44,7 @@
   ];
   const PLATFORM_RULES = {
     'Reels': '前 3 秒點出處境；口語短句；每 3–5 秒切畫面；結尾保留一個明確 CTA。',
-    'IG 輪播': '封面先講處境或結果；一頁一個重點；步驟可截圖；結尾只放一個 CTA。',
+    'IG 輪播': '封面先講處境或結果；一頁一個重點；步驟可截圖；結尾以主要 CTA 為主，必要時承接次要 CTA。',
     'Threads': '第一句放觀點；每段短句；保留一個真實經驗；最後承接指定 CTA。',
     'Email': '補上背景、案例與限制；主旨直接說讀者利益；結尾放一個連結或回信 CTA。'
   };
@@ -55,7 +55,7 @@
     { key: 'method', title: '方法｜第一個今天能做的動作', hint: '步驟、判斷標準或完成線，避免只有鼓勵。' },
     { key: 'case', title: '案例｜用前後差異建立可信度', hint: '放自己的經驗、對話、數字或限制條件。' },
     { key: 'check', title: '檢查｜讓內容值得回來看', hint: '清單、錯誤提醒或完成檢核。' },
-    { key: 'cta', title: 'CTA｜只承接一個下一步', hint: '留言、收藏、私訊、分享或轉發只選一個。' }
+    { key: 'cta', title: 'CTA｜安排主要與次要下一步', hint: '主要 CTA 要清楚；次要 CTA 只在文字自然時承接，分享與轉發分開記錄。' }
   ];
 
   window.CONTENT_CTA_TYPES = CTA_TYPE_OPTIONS.map(({ value, label }) => ({ value, label }));
@@ -90,39 +90,71 @@
     return safeArray(value).join('\n');
   }
 
-  function normalizeCtaType(value) {
-    const raw = String(value || '').trim();
-    return CTA_TYPE_OPTIONS.some(option => option.value === raw) ? raw : '收藏';
+  function normalizeCtaTypes(value, fallback = []) {
+    const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+    const normalized = [];
+    for (const item of values) {
+      const raw = String(item || '').trim();
+      if (!CTA_TYPE_OPTIONS.some(option => option.value === raw) || normalized.includes(raw)) continue;
+      if (raw === '無直接 CTA') return ['無直接 CTA'];
+      normalized.push(raw);
+      if (normalized.length >= 3) break;
+    }
+    if (normalized.length) return normalized;
+    const fallbackValues = Array.isArray(fallback) ? fallback : fallback === undefined || fallback === null ? [] : [fallback];
+    if (fallbackValues.length && fallbackValues !== values) return normalizeCtaTypes(fallbackValues);
+    return [];
   }
 
-  function inferCtaType(value) {
+  function inferCtaTypes(value) {
     const raw = String(value || '').trim();
-    if (raw.includes('轉發')) return '轉發';
-    if (raw.includes('分享')) return '分享';
-    if (raw.includes('私訊')) return '私訊';
-    if (raw.includes('留言')) return '留言';
-    if (raw.includes('購買') || raw.includes('下單')) return '購買';
-    if (raw.includes('到店') || raw.includes('到場') || raw.includes('現場')) return '到店';
-    if (raw.includes('連結') || raw.includes('網址')) return '連結';
-    if (raw.includes('不需要') || raw.includes('不用 CTA')) return '無直接 CTA';
-    return '收藏';
+    if (!raw) return [];
+    const keywords = [
+      ['轉發', '轉發'], ['分享', '分享'], ['私訊', '私訊'], ['留言', '留言'],
+      ['購買', '購買'], ['下單', '購買'], ['到店', '到店'], ['到場', '到店'],
+      ['現場', '到店'], ['連結', '連結'], ['網址', '連結'],
+      ['不需要', '無直接 CTA'], ['不用 CTA', '無直接 CTA']
+    ];
+    return normalizeCtaTypes(keywords
+      .map(([keyword, type]) => ({ keyword, type, index: raw.indexOf(keyword) }))
+      .filter(item => item.index >= 0)
+      .sort((a, b) => a.index - b.index || a.keyword.length - b.keyword.length)
+      .map(item => item.type));
+  }
+
+  function ensureCtaTypes(value, fallbackText = '') {
+    const normalized = normalizeCtaTypes(value);
+    if (normalized.length) return normalized;
+    return normalizeCtaTypes(inferCtaTypes(fallbackText), ['收藏']);
+  }
+
+  function primaryCtaType(value, fallbackText = '') {
+    return ensureCtaTypes(value, fallbackText)[0] || '收藏';
   }
 
   function ctaFallback(value) {
-    return CTA_TYPE_OPTIONS.find(option => option.value === normalizeCtaType(value))?.fallback || '';
+    return CTA_TYPE_OPTIONS.find(option => option.value === primaryCtaType(value))?.fallback || '';
   }
 
   function ctaHint(value) {
-    return CTA_TYPE_OPTIONS.find(option => option.value === normalizeCtaType(value))?.hint || '';
+    return ensureCtaTypes(value).map(type => CTA_TYPE_OPTIONS.find(option => option.value === type)?.hint).filter(Boolean).join(' ');
   }
 
-  function ctaTypeOptions(selected) {
-    const value = normalizeCtaType(selected);
-    return CTA_TYPE_OPTIONS.map(option => `<option value="${escapeHtml(option.value)}" ${option.value === value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('');
+  function ctaTypesOptions(selected) {
+    const values = ensureCtaTypes(selected);
+    const options = [...CTA_TYPE_OPTIONS].sort((a, b) => {
+      const aIndex = values.indexOf(a.value);
+      const bIndex = values.indexOf(b.value);
+      if (aIndex >= 0 && bIndex >= 0) return aIndex - bIndex;
+      if (aIndex >= 0) return -1;
+      if (bIndex >= 0) return 1;
+      return 0;
+    });
+    return `<div class="cta-type-options" role="group" aria-label="CTA 類型">${options.map(option => `<label><input type="checkbox" name="ctaTypes" value="${escapeHtml(option.value)}" ${values.includes(option.value) ? 'checked' : ''} onchange="toggleCtaTypeCheckbox(this)"><span>${escapeHtml(option.label)}</span></label>`).join('')}</div>`;
   }
 
   function ctaShotAction(value) {
-    return {
+    const actions = {
       留言: '指向留言區並示範關鍵字',
       收藏: '示範收藏按鈕或保存畫面',
       私訊: '指向私訊按鈕並示範關鍵字',
@@ -132,7 +164,27 @@
       分享: '示範分享給朋友的操作',
       轉發: '示範轉發到限時動態或社群',
       '無直接 CTA': '保留最後反應或觀點畫面'
-    }[normalizeCtaType(value)];
+    };
+    return ensureCtaTypes(value).map(type => actions[type]).filter(Boolean).join('；');
+  }
+
+  function toggleCtaTypeCheckbox(input) {
+    const group = input.closest('.cta-type-options');
+    if (!group) return;
+    const none = group.querySelector('input[value="無直接 CTA"]');
+    if (input.value === '無直接 CTA' && input.checked) {
+      group.querySelectorAll('input[name="ctaTypes"]').forEach(item => { if (item !== input) item.checked = false; });
+      return;
+    }
+    if (input.checked && none) none.checked = false;
+    const checked = [...group.querySelectorAll('input[name="ctaTypes"]:checked')];
+    if (checked.length > 3) {
+      input.checked = false;
+      return;
+    }
+    // The DOM order is also the FormData order, so moving a newly selected
+    // option to the end preserves primary -> secondary CTA intent.
+    if (input.checked) group.appendChild(input.closest('label'));
   }
 
   function formatDateTime(value) {
@@ -192,7 +244,11 @@
       topicScore: topic.topicScore || null,
       reviewDueAt: topic.reviewDueAt || null
     }));
-    state.deliverables ||= [];
+    state.deliverables = (state.deliverables || []).filter(Boolean).map(deliverable => {
+      const ctaTypes = ensureCtaTypes(deliverable?.ctaTypes ?? deliverable?.ctaType, deliverable?.segments?.find(segment => segment?.key === 'cta')?.text || deliverable?.cta);
+      const { ctaType: _legacyCtaType, ...withoutLegacyCtaType } = deliverable;
+      return { ...withoutLegacyCtaType, ctaTypes };
+    });
     state.reviews ||= [];
     state.workflowTasks ||= WORKFLOW_TASKS.map((task, index) => ({ id: `day-${index + 1}`, ...task, completed: false }));
     if (!Array.isArray(state.workflowTasks) || state.workflowTasks.length !== WORKFLOW_TASKS.length) {
@@ -508,8 +564,9 @@
     const profile = state.profile;
     const core = String(input.coreMessage || topic.differentiation || topic.hook || topic.title).trim();
     const caseText = String(input.caseText || profile.experienceStories?.[0] || '補上你的真實案例、對話或前後差異。').trim();
-    const ctaType = normalizeCtaType(input.ctaType || topic.ctaType || inferCtaType(input.cta || topic.cta));
-    const cta = String(input.cta || topic.cta || ctaFallback(ctaType)).trim();
+    const ctaTypes = ensureCtaTypes(input.ctaTypes?.length ? input.ctaTypes : input.ctaType || topic.ctaTypes || topic.ctaType, input.cta || topic.cta);
+    const primaryCta = primaryCtaType(ctaTypes, input.cta || topic.cta);
+    const cta = String(input.cta || topic.cta || ctaFallback(ctaTypes)).trim();
     const audience = topic.targetAudience || profile.audienceIdentity || '目標受眾';
     const structure = safeArray(topic.contentStructure);
     const segments = [
@@ -526,7 +583,7 @@
         `先用一個判斷框架處理「${core}」。`,
         segments[2].text,
         caseText,
-        `發布前檢查：有處境、有方法、有證據，而且只留一個 CTA。`,
+        `發布前檢查：有處境、有方法、有證據，而且主要 CTA 清楚、次要 CTA 不搶焦。`,
         cta
       ][index];
       return { ...page, text: fallback };
@@ -542,7 +599,7 @@
       { shot: '02', label: '痛點', scene: '桌前中景', action: '展示卡住的工具或畫面', check: '字幕空間足夠' },
       { shot: '03', label: '方法', scene: '俯拍桌面', action: '手寫步驟或操作工具', check: '畫面清楚' },
       { shot: '04', label: '案例', scene: '側面近景', action: '放前後差異、舊照片或成果', check: '有證據' },
-      { shot: '05', label: 'CTA', scene: '正面中景', action: ctaShotAction(ctaType), check: ctaType === '無直接 CTA' ? '情緒收尾完整' : 'CTA 動作與文字一致' }
+      { shot: '05', label: 'CTA', scene: '正面中景', action: ctaShotAction(ctaTypes), check: primaryCta === '無直接 CTA' ? '情緒收尾完整' : 'CTA 動作與文字一致' }
     ];
     return {
       id: uid('d'),
@@ -551,7 +608,7 @@
       angle: topic.angle || WORKFLOW_ANGLES[0],
       coreMessage: core,
       audience,
-      ctaType,
+      ctaTypes,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       segments,
@@ -563,12 +620,12 @@
   }
 
   function deliverableEditor(deliverable) {
-    const ctaType = normalizeCtaType(deliverable.ctaType || inferCtaType(deliverable.segments?.find(segment => segment.key === 'cta')?.text));
+    const ctaTypes = ensureCtaTypes(deliverable.ctaTypes ?? deliverable.ctaType, deliverable.segments?.find(segment => segment.key === 'cta')?.text || deliverable.cta);
     const segmentFields = deliverable.segments.map(segment => `<div class="delivery-field"><label>${segment.label}</label><textarea name="segment_${segment.key}">${escapeHtml(segment.text)}</textarea></div>`).join('');
     const pageFields = deliverable.carouselPages.map((page, index) => `<div class="carousel-page"><div class="carousel-page-head"><span>P${String(index + 1).padStart(2, '0')}</span><strong>${escapeHtml(page.title)}</strong><small>${escapeHtml(page.hint)}</small></div><textarea name="carousel_${index}">${escapeHtml(page.text)}</textarea></div>`).join('');
     const platformFields = Object.entries(deliverable.platformVersions).map(([platform, text]) => `<div class="platform-version"><div class="platform-version-head"><strong>${platform}</strong><button type="button" class="btn tiny" onclick="copyText(this.previousElementSibling.parentElement.nextElementSibling.value)">複製</button></div><small>${PLATFORM_RULES[platform]}</small><textarea name="platform_${platform}">${escapeHtml(text)}</textarea></div>`).join('');
     const shotFields = deliverable.shots.map((shot, index) => `<div class="shot-row"><span>${shot.shot}</span><input name="shot_${index}_label" value="${escapeHtml(shot.label)}"><input name="shot_${index}_scene" value="${escapeHtml(shot.scene)}"><input name="shot_${index}_action" value="${escapeHtml(shot.action)}"><input name="shot_${index}_check" value="${escapeHtml(shot.check)}"></div>`).join('');
-    const ctaField = `<div class="form-field full"><label>CTA 類型</label><select name="ctaType">${ctaTypeOptions(ctaType)}</select><div class="category-helper">${escapeHtml(ctaHint(ctaType))} 內容文字仍可在下方 CTA 段落自行調整。</div></div>`;
+    const ctaField = `<div class="form-field full"><label>CTA 類型</label>${ctaTypesOptions(ctaTypes)}<div class="category-helper">${escapeHtml(ctaHint(ctaTypes))} 內容文字仍可在下方 CTA 段落自行調整。</div></div>`;
     return `<form class="delivery-editor" onsubmit="saveDeliverable(event,'${deliverable.id}')"><section class="panel"><div class="section-head"><div><h2>母內容五段式</h2><p>每一段只完成一個任務：讓人停下、感到被理解、學會方法、相信經驗、採取下一步。</p></div><span class="tag blue">${escapeHtml(deliverable.angle)}</span></div>${ctaField}<div class="delivery-fields">${segmentFields}</div></section><section class="panel"><div class="section-head"><div><h2>七頁輪播</h2><p>封面不解釋全部；每頁一個重點；最後只保留一個 CTA。</p></div></div><div class="carousel-pages">${pageFields}</div></section><section class="panel"><div class="section-head"><div><h2>四平台改寫</h2><p>核心觀點與案例保持一致，只調整閱讀節奏與 CTA。</p></div></div><div class="platform-versions">${platformFields}</div></section><section class="panel"><div class="section-head"><div><h2>拍攝分鏡表</h2><p>依場景分組，一個場景一次拍完，減少來回換裝與找道具。</p></div></div><div class="shot-table"><div class="shot-row shot-head"><span>SHOT</span><span>段落</span><span>場景與鏡位</span><span>動作／B-roll</span><span>檢查</span></div>${shotFields}</div></section><div class="form-actions"><button class="btn primary">儲存內容交付包</button><button type="button" class="btn danger" onclick="deleteDeliverable('${deliverable.id}')">刪除交付包</button></div></form>`;
   }
 
@@ -579,14 +636,16 @@
     const current = state.deliverables.find(item => item.id === window.workflowDeliverableId) || state.deliverables[0];
     const taskDone = state.workflowTasks.filter(task => task.completed).length;
     const taskMarkup = state.workflowTasks.map(task => `<button type="button" class="workflow-task ${task.completed ? 'completed' : ''}" onclick="toggleWorkflowTask('${task.id}')"><span class="task-check">${task.completed ? '✓' : task.day}</span><span><strong>第 ${task.day} 天｜${task.title}</strong><small>${task.detail}</small></span></button>`).join('');
-    const createPanel = topics.length ? `<section class="panel"><div class="section-head"><div><h2>建立內容交付包</h2><p>先選一個題目，再把真實案例與 CTA 補進去。</p></div></div><form onsubmit="createDeliverableFromForm(event)"><div class="form-grid"><div class="form-field full"><label>來源題目</label><select name="topicId" onchange="window.workflowTopicId=this.value">${sourceTopicOptions(selectedId)}</select></div>${field('核心觀點', 'coreMessage', selectedTopic(selectedId)?.differentiation || '', { tag: 'textarea', full: true, placeholder: '這一支內容最後希望讀者記住哪一句？' })}${field('真實案例或前後差異', 'caseText', state.profile.experienceStories?.[0] || '', { tag: 'textarea', full: true, placeholder: '不要讓智慧服務替你編造；沒有資料就先補上。' })}<div class="form-field"><label>CTA 類型</label><select name="ctaType">${ctaTypeOptions(selectedTopic(selectedId)?.ctaType || inferCtaType(selectedTopic(selectedId)?.cta))}</select><div class="category-helper">選一個主要行動；分享與轉發分開記錄。</div></div>${field('唯一 CTA', 'cta', selectedTopic(selectedId)?.cta || '', { full: true, placeholder: '例如：分享給可能需要的朋友' })}</div><div class="form-actions"><button class="btn primary">建立可編輯交付包</button></div></form></section>` : '<div class="empty"><strong>先建立一個題目</strong>有了題目後，才能產出母內容與四平台版本。</div>';
-    const deliverables = state.deliverables.map(item => `<button type="button" class="delivery-list-row ${current?.id === item.id ? 'active' : ''}" onclick="window.workflowDeliverableId='${item.id}';workflow()"><span><strong>${escapeHtml(item.title)}</strong><small>${formatDateTime(item.updatedAt)} · ${escapeHtml(item.angle || '未選切角')} · CTA：${escapeHtml(item.ctaType || '未設定')}</small></span><em>${item.status === 'READY' ? '已完成' : '草稿'}</em></button>`).join('');
+      const createPanel = topics.length ? `<section class="panel"><div class="section-head"><div><h2>建立內容交付包</h2><p>先選一個題目，再把真實案例與 CTA 補進去。</p></div></div><form onsubmit="createDeliverableFromForm(event)"><div class="form-grid"><div class="form-field full"><label>來源題目</label><select name="topicId" onchange="window.workflowTopicId=this.value">${sourceTopicOptions(selectedId)}</select></div>${field('核心觀點', 'coreMessage', selectedTopic(selectedId)?.differentiation || '', { tag: 'textarea', full: true, placeholder: '這一支內容最後希望讀者記住哪一句？' })}${field('真實案例或前後差異', 'caseText', state.profile.experienceStories?.[0] || '', { tag: 'textarea', full: true, placeholder: '不要讓智慧服務替你編造；沒有資料就先補上。' })}<div class="form-field full"><label>CTA 類型</label>${ctaTypesOptions(selectedTopic(selectedId)?.ctaTypes || selectedTopic(selectedId)?.ctaType || inferCtaTypes(selectedTopic(selectedId)?.cta))}<div class="category-helper">可選 1–3 個；勾選順序即主要 CTA 到次要 CTA，分享與轉發分開記錄。</div></div>${field('CTA 文字', 'cta', selectedTopic(selectedId)?.cta || '', { full: true, placeholder: '例如：分享給可能需要的朋友；留言「關鍵字」取得清單' })}</div><div class="form-actions"><button class="btn primary">建立可編輯交付包</button></div></form></section>` : '<div class="empty"><strong>先建立一個題目</strong>有了題目後，才能產出母內容與四平台版本。</div>';
+    const deliverables = state.deliverables.map(item => `<button type="button" class="delivery-list-row ${current?.id === item.id ? 'active' : ''}" onclick="window.workflowDeliverableId='${item.id}';workflow()"><span><strong>${escapeHtml(item.title)}</strong><small>${formatDateTime(item.updatedAt)} · ${escapeHtml(item.angle || '未選切角')} · CTA：${escapeHtml(ensureCtaTypes(item.ctaTypes || item.ctaType).join('、') || '未設定')}</small></span><em>${item.status === 'READY' ? '已完成' : '草稿'}</em></button>`).join('');
     layout('內容工作流', '內容工作流 ／ 從一題走到可拍、可發、可復盤', '把手冊中的「母內容→輪播→短影音→四平台→分鏡」放進同一份交付包；每段都能直接編輯與複製。', `<div class="workflow-layout"><div>${createPanel}${current ? deliverableEditor(current) : '<section class="panel"><div class="empty"><strong>還沒有交付包</strong>建立後會在這裡出現可編輯版本。</div></section>'}</div><aside><section class="panel workflow-week"><div class="section-head"><div><h2>七天啟動計畫</h2><p>已完成 ${taskDone}/7 個交付物</p></div><span class="tag ${taskDone === 7 ? 'sage' : 'blue'}">${Math.round((taskDone / 7) * 100)}%</span></div><div class="workflow-task-list">${taskMarkup}</div></section><section class="panel"><div class="section-head"><div><h2>我的交付包</h2><p>保留每一輪的修改脈絡。</p></div></div><div class="delivery-list">${deliverables || '<div class="muted">尚未建立</div>'}</div></section></aside></div>`);
   }
 
   function createDeliverableFromForm(event) {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const formData = new FormData(event.currentTarget);
+    const values = Object.fromEntries(formData);
+    values.ctaTypes = formData.getAll('ctaTypes');
     const topic = selectedTopic(values.topicId);
     if (!topic) return;
     const deliverable = createDeliverable(topic, values);
@@ -601,8 +660,11 @@
     event.preventDefault();
     const deliverable = state.deliverables.find(item => item.id === id);
     if (!deliverable) return;
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    deliverable.ctaType = normalizeCtaType(values.ctaType || deliverable.ctaType);
+    const formData = new FormData(event.currentTarget);
+    const values = Object.fromEntries(formData);
+    values.ctaTypes = formData.getAll('ctaTypes');
+    deliverable.ctaTypes = ensureCtaTypes(values.ctaTypes, deliverable.segments?.find(segment => segment.key === 'cta')?.text || deliverable.cta);
+    delete deliverable.ctaType;
     deliverable.segments = deliverable.segments.map(segment => ({ ...segment, text: String(values[`segment_${segment.key}`] || '').trim() }));
     deliverable.carouselPages = deliverable.carouselPages.map((page, index) => ({ ...page, text: String(values[`carousel_${index}`] || '').trim() }));
     deliverable.platformVersions = Object.fromEntries(Object.keys(deliverable.platformVersions).map(platform => [platform, String(values[`platform_${platform}`] || '').trim()]));
@@ -920,6 +982,7 @@
   window.saveTopicScore = saveTopicScore;
   window.createDeliverableFromForm = createDeliverableFromForm;
   window.saveDeliverable = saveDeliverable;
+  window.toggleCtaTypeCheckbox = toggleCtaTypeCheckbox;
   window.deleteDeliverable = deleteDeliverable;
   window.toggleWorkflowTask = toggleWorkflowTask;
   window.copyText = copyText;
@@ -941,6 +1004,7 @@
 
   document.head.insertAdjacentHTML('beforeend', `<style id="workflow-enhancements-style">
     .workflow-progress{display:grid;gap:9px;background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:0 0 18px}.workflow-progress>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:12px}.workflow-progress strong{font-size:13px}.workflow-progress span{font-size:11px;color:var(--gray)}.progress-track{height:7px;border-radius:99px;background:#eee9e1;overflow:hidden}.progress-track i{display:block;height:100%;border-radius:inherit;background:var(--pink);transition:width .2s}.positioning-form{display:grid;gap:17px}.pillar-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.pillar-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fffdfa}.pillar-number{font-size:11px;color:var(--pink);font-weight:800;margin-bottom:10px}.pillar-card .form-field{margin-bottom:10px}.pillar-card .form-field:last-child{margin-bottom:0}.pillar-card textarea{min-height:76px}.scoring-layout{display:grid;grid-template-columns:minmax(270px,.75fr) minmax(0,1.25fr);gap:17px}.score-topic-list{display:grid;gap:7px}.score-topic-row,.delivery-list-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid transparent;background:transparent;border-radius:999px;padding:11px 12px;text-align:left;color:var(--dark);transition:.15s}.score-topic-row:hover,.score-topic-row.active,.delivery-list-row:hover,.delivery-list-row.active{border-color:var(--soft-pink);background:var(--light-pink)}.score-topic-row span,.delivery-list-row span{min-width:0;display:grid;gap:3px}.score-topic-row strong,.delivery-list-row strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.score-topic-row small,.delivery-list-row small{font-size:10px;color:var(--gray);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.score-topic-row em,.delivery-list-row em{font-size:10px;font-style:normal;white-space:nowrap;color:var(--medium)}.score-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.score-input{border:1px solid var(--line);border-radius:14px;padding:10px;background:#fffdfa}.score-input label{display:flex;justify-content:space-between;gap:4px;font-size:11px;font-weight:800}.score-input label span{font-weight:500;color:var(--gray)}.score-input input{margin-top:8px;width:100%;text-align:center;border:1px solid var(--line);border-radius:999px;padding:8px;background:white}.score-input small{display:block;color:var(--gray);font-size:10px;line-height:1.45;margin-top:7px}.score-summary{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:var(--cream);border-radius:13px;padding:11px 13px;color:var(--medium);font-size:11px}.score-summary strong{font-size:19px;color:var(--dark)}.score-summary span:last-child{color:var(--gray)}.workflow-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(285px,.65fr);gap:18px}.workflow-layout>aside{display:grid;gap:17px;align-content:start}.workflow-task-list,.delivery-list{display:grid;gap:6px}.workflow-task{width:100%;display:grid;grid-template-columns:30px 1fr;gap:10px;text-align:left;border:1px solid transparent;background:transparent;border-radius:999px;padding:9px;color:var(--dark)}.workflow-task:hover{background:#faf5ef;border-color:var(--line)}.workflow-task.completed{background:var(--light-sage)}.task-check{width:25px;height:25px;display:grid;place-items:center;border-radius:50%;background:#eee9e1;color:var(--medium);font-weight:800;font-size:11px}.workflow-task.completed .task-check{background:var(--sage);color:white}.workflow-task span:last-child{display:grid;gap:2px}.workflow-task strong{font-size:11px}.workflow-task small{font-size:10px;color:var(--gray)}.delivery-editor{display:grid;gap:17px;margin-top:17px}.delivery-fields{display:grid;grid-template-columns:repeat(5,1fr);gap:9px}.delivery-field{display:grid;gap:6px}.delivery-field label{font-size:11px;color:var(--medium);font-weight:800}.delivery-field textarea,.carousel-page textarea,.platform-version textarea{width:100%;min-height:128px;border:1px solid var(--line);border-radius:14px;padding:10px;background:#fff;resize:vertical;color:var(--dark);font-size:12px}.carousel-pages{display:grid;gap:8px}.carousel-page{border:1px solid var(--line);border-radius:14px;padding:11px;background:#fffdfa}.carousel-page-head{display:grid;grid-template-columns:40px auto 1fr;align-items:baseline;gap:7px;margin-bottom:7px}.carousel-page-head>span{color:var(--pink);font-size:11px;font-weight:800}.carousel-page-head strong{font-size:12px}.carousel-page-head small{color:var(--gray);font-size:10px}.carousel-page textarea{min-height:74px}.platform-versions{display:grid;grid-template-columns:repeat(2,1fr);gap:11px}.platform-version{display:grid;gap:6px;border:1px solid var(--line);border-radius:14px;padding:12px;background:#fffdfa}.platform-version-head{display:flex;align-items:center;justify-content:space-between}.platform-version-head strong{font-size:13px}.platform-version>small{color:var(--gray);font-size:10px}.platform-version textarea{min-height:180px}.shot-table{display:grid;gap:4px;overflow:auto}.shot-row{display:grid;grid-template-columns:42px repeat(4,minmax(120px,1fr));gap:5px;align-items:center}.shot-row span{font-size:11px;color:var(--pink);font-weight:800;text-align:center}.shot-row input{width:100%;border:1px solid var(--line);border-radius:999px;padding:8px 9px;color:var(--dark);font-size:11px;background:#fff}.shot-head{padding:0 0 5px;border-bottom:1px solid var(--line)}.shot-head span{color:var(--gray);font-size:10px}.review-list{display:grid;gap:9px;max-height:640px;overflow:auto}.review-card{border:1px solid var(--line);border-radius:14px;padding:13px;background:#fffdfa}.review-card-head{display:flex;align-items:start;justify-content:space-between;gap:10px}.review-card-head>div{display:grid;gap:3px;min-width:0}.review-card-head strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.review-card-head small{font-size:10px;color:var(--gray)}.review-metrics{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}.review-metrics span{background:var(--cream);border-radius:999px;padding:5px 8px;font-size:10px;color:var(--gray)}.review-metrics b{color:var(--dark);margin-left:3px}.review-card p{font-size:11px;color:var(--medium);margin:5px 0}.review-card p strong{color:var(--dark)}
+    .cta-type-options{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}.cta-type-options label{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:7px 10px;background:#fffdfa;color:var(--medium);font-size:11px;cursor:pointer}.cta-type-options label:has(input:checked){border-color:var(--pink);background:var(--light-pink);color:var(--dark)}.cta-type-options input{accent-color:var(--pink)}
     .mobile-nav{overflow-x:auto;justify-content:flex-start;gap:4px;padding:0 7px}.mobile-nav a{flex:0 0 58px}.mobile-nav a span{font-size:16px}
     @media(max-width:1120px){.pillar-grid,.delivery-fields{grid-template-columns:1fr 1fr}.workflow-layout,.scoring-layout{grid-template-columns:1fr}.score-grid{grid-template-columns:repeat(3,1fr)}}
     @media(max-width:760px){.pillar-grid,.delivery-fields,.platform-versions{grid-template-columns:1fr}.score-grid{grid-template-columns:repeat(2,1fr)}.workflow-layout{display:block}.workflow-layout>aside{margin-top:17px}.carousel-page-head{grid-template-columns:38px 1fr}.carousel-page-head small{grid-column:2}.shot-row{grid-template-columns:30px repeat(4,minmax(130px,1fr));min-width:680px}.shot-table{overflow-x:auto}.workflow-progress>div:first-child{align-items:start;flex-direction:column;gap:3px}}

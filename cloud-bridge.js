@@ -99,7 +99,14 @@
 
   function rowToDeliverable(row) {
     const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
-    return { ...payload, id: row.id, topicId: row.topic_id, title: row.title, angle: row.angle, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at };
+    const allowedCtaTypes = new Set(['留言', '收藏', '私訊', '連結', '購買', '到店', '分享', '轉發', '無直接 CTA']);
+    const payloadCtaTypes = Array.isArray(payload.ctaTypes) ? payload.ctaTypes : payload.ctaType ? [payload.ctaType] : [];
+    const storedCtaTypes = Array.isArray(row.cta_types) && row.cta_types.length ? row.cta_types : payloadCtaTypes;
+    const ctaTypes = [...new Set(storedCtaTypes
+      .filter(type => allowedCtaTypes.has(type)))].slice(0, 3);
+    if (ctaTypes.includes('無直接 CTA')) ctaTypes.splice(0, ctaTypes.length, '無直接 CTA');
+    const { ctaType: _legacyCtaType, ...payloadWithoutLegacyCtaType } = payload;
+    return { ...payloadWithoutLegacyCtaType, ctaTypes, id: row.id, topicId: row.topic_id, title: row.title, angle: row.angle, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at };
   }
 
   function rowToReview(row) {
