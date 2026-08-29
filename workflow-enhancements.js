@@ -14,6 +14,17 @@
   'use strict';
 
   const WORKFLOW_ANGLES = ['錯誤', '步驟', '案例', '觀點', '清單'];
+  const CTA_TYPE_OPTIONS = [
+    { value: '留言', label: '留言', hint: '請觀眾留言關鍵字或問題。', fallback: '留言「關鍵字」拿檢核表。' },
+    { value: '收藏', label: '收藏', hint: '讓觀眾保存，之後回來使用。', fallback: '收藏這支，下次需要時再打開。' },
+    { value: '私訊', label: '私訊', hint: '引導觀眾發送關鍵字或需求。', fallback: '私訊我「關鍵字」，我把資料發給你。' },
+    { value: '連結', label: '點擊連結', hint: '把觀眾帶到個人檔案或指定頁面。', fallback: '點擊個人檔案連結，查看完整資料。' },
+    { value: '購買', label: '購買', hint: '引導觀眾購買產品或服務。', fallback: '想進一步使用，點擊連結了解方案。' },
+    { value: '到店', label: '到店／到場', hint: '引導觀眾前往實體地點。', fallback: '有機會到現場的話，可以把這個行程排進去。' },
+    { value: '分享', label: '分享', hint: '分享給可能需要這份資訊的人。', fallback: '分享給可能需要這份資訊的朋友。' },
+    { value: '轉發', label: '轉發', hint: '轉發到限時動態或其他社群。', fallback: '轉發給一起創作或旅行的夥伴。' },
+    { value: '無直接 CTA', label: '無直接 CTA', hint: '用觀點或情緒收尾，不要求下一步。', fallback: '' }
+  ];
   const WORKFLOW_KEYS = ['demand', 'saveValue', 'evidence', 'conversion', 'effort'];
   const WORKFLOW_LABELS = {
     demand: '需求強度',
@@ -32,9 +43,9 @@
     { day: 7, title: '發布並排 48–72 小時復盤', detail: '只測一個變因，記錄下一步行動' }
   ];
   const PLATFORM_RULES = {
-    'Reels': '前 3 秒點出處境；口語短句；每 3–5 秒切畫面；結尾保留一個留言關鍵字。',
-    'IG 輪播': '封面先講處境或結果；一頁一個重點；步驟可截圖；結尾只放一個收藏或留言 CTA。',
-    'Threads': '第一句放觀點；每段短句；保留一個真實經驗；最後用問題邀請討論。',
+    'Reels': '前 3 秒點出處境；口語短句；每 3–5 秒切畫面；結尾保留一個明確 CTA。',
+    'IG 輪播': '封面先講處境或結果；一頁一個重點；步驟可截圖；結尾只放一個 CTA。',
+    'Threads': '第一句放觀點；每段短句；保留一個真實經驗；最後承接指定 CTA。',
     'Email': '補上背景、案例與限制；主旨直接說讀者利益；結尾放一個連結或回信 CTA。'
   };
   const CAROUSEL_TEMPLATE = [
@@ -44,8 +55,10 @@
     { key: 'method', title: '方法｜第一個今天能做的動作', hint: '步驟、判斷標準或完成線，避免只有鼓勵。' },
     { key: 'case', title: '案例｜用前後差異建立可信度', hint: '放自己的經驗、對話、數字或限制條件。' },
     { key: 'check', title: '檢查｜讓內容值得回來看', hint: '清單、錯誤提醒或完成檢核。' },
-    { key: 'cta', title: 'CTA｜只承接一個下一步', hint: '留言、收藏、私訊或連結只選一個。' }
+    { key: 'cta', title: 'CTA｜只承接一個下一步', hint: '留言、收藏、私訊、分享或轉發只選一個。' }
   ];
+
+  window.CONTENT_CTA_TYPES = CTA_TYPE_OPTIONS.map(({ value, label }) => ({ value, label }));
 
   function safeArray(value) {
     return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -75,6 +88,51 @@
 
   function joinLines(value) {
     return safeArray(value).join('\n');
+  }
+
+  function normalizeCtaType(value) {
+    const raw = String(value || '').trim();
+    return CTA_TYPE_OPTIONS.some(option => option.value === raw) ? raw : '收藏';
+  }
+
+  function inferCtaType(value) {
+    const raw = String(value || '').trim();
+    if (raw.includes('轉發')) return '轉發';
+    if (raw.includes('分享')) return '分享';
+    if (raw.includes('私訊')) return '私訊';
+    if (raw.includes('留言')) return '留言';
+    if (raw.includes('購買') || raw.includes('下單')) return '購買';
+    if (raw.includes('到店') || raw.includes('到場') || raw.includes('現場')) return '到店';
+    if (raw.includes('連結') || raw.includes('網址')) return '連結';
+    if (raw.includes('不需要') || raw.includes('不用 CTA')) return '無直接 CTA';
+    return '收藏';
+  }
+
+  function ctaFallback(value) {
+    return CTA_TYPE_OPTIONS.find(option => option.value === normalizeCtaType(value))?.fallback || '';
+  }
+
+  function ctaHint(value) {
+    return CTA_TYPE_OPTIONS.find(option => option.value === normalizeCtaType(value))?.hint || '';
+  }
+
+  function ctaTypeOptions(selected) {
+    const value = normalizeCtaType(selected);
+    return CTA_TYPE_OPTIONS.map(option => `<option value="${escapeHtml(option.value)}" ${option.value === value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('');
+  }
+
+  function ctaShotAction(value) {
+    return {
+      留言: '指向留言區並示範關鍵字',
+      收藏: '示範收藏按鈕或保存畫面',
+      私訊: '指向私訊按鈕並示範關鍵字',
+      連結: '指向個人檔案連結',
+      購買: '展示產品與購買入口',
+      到店: '展示地點、路線或現場畫面',
+      分享: '示範分享給朋友的操作',
+      轉發: '示範轉發到限時動態或社群',
+      '無直接 CTA': '保留最後反應或觀點畫面'
+    }[normalizeCtaType(value)];
   }
 
   function formatDateTime(value) {
@@ -450,7 +508,8 @@
     const profile = state.profile;
     const core = String(input.coreMessage || topic.differentiation || topic.hook || topic.title).trim();
     const caseText = String(input.caseText || profile.experienceStories?.[0] || '補上你的真實案例、對話或前後差異。').trim();
-    const cta = String(input.cta || topic.cta || '收藏這份檢查表，下次照著做。').trim();
+    const ctaType = normalizeCtaType(input.ctaType || topic.ctaType || inferCtaType(input.cta || topic.cta));
+    const cta = String(input.cta || topic.cta || ctaFallback(ctaType)).trim();
     const audience = topic.targetAudience || profile.audienceIdentity || '目標受眾';
     const structure = safeArray(topic.contentStructure);
     const segments = [
@@ -475,7 +534,7 @@
     const platformVersions = {
       'Reels': `${segments[0].text}\n\n${segments[1].text}\n\n做法：${segments[2].text}\n\n${segments[3].text}\n\n${segments[4].text}`,
       'IG 輪播': carouselPages.map((page, index) => `P${String(index + 1).padStart(2, '0')}｜${page.title}\n${page.text}`).join('\n\n'),
-      'Threads': `${core}\n\n${segments[1].text}\n\n我的做法是：${segments[2].text}\n\n${segments[3].text}\n\n你目前卡在哪一步？`,
+      'Threads': `${core}\n\n${segments[1].text}\n\n我的做法是：${segments[2].text}\n\n${segments[3].text}\n\n${segments[4].text}`,
       'Email': `主旨：${topic.title}\n\n${segments[1].text}\n\n${segments[2].text}\n\n案例：${segments[3].text}\n\n下一步：${segments[4].text}`
     };
     const shots = [
@@ -483,7 +542,7 @@
       { shot: '02', label: '痛點', scene: '桌前中景', action: '展示卡住的工具或畫面', check: '字幕空間足夠' },
       { shot: '03', label: '方法', scene: '俯拍桌面', action: '手寫步驟或操作工具', check: '畫面清楚' },
       { shot: '04', label: '案例', scene: '側面近景', action: '放前後差異、舊照片或成果', check: '有證據' },
-      { shot: '05', label: 'CTA', scene: '正面中景', action: '指向留言或連結區', check: '關鍵字正確' }
+      { shot: '05', label: 'CTA', scene: '正面中景', action: ctaShotAction(ctaType), check: ctaType === '無直接 CTA' ? '情緒收尾完整' : 'CTA 動作與文字一致' }
     ];
     return {
       id: uid('d'),
@@ -492,6 +551,7 @@
       angle: topic.angle || WORKFLOW_ANGLES[0],
       coreMessage: core,
       audience,
+      ctaType,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       segments,
@@ -503,11 +563,13 @@
   }
 
   function deliverableEditor(deliverable) {
+    const ctaType = normalizeCtaType(deliverable.ctaType || inferCtaType(deliverable.segments?.find(segment => segment.key === 'cta')?.text));
     const segmentFields = deliverable.segments.map(segment => `<div class="delivery-field"><label>${segment.label}</label><textarea name="segment_${segment.key}">${escapeHtml(segment.text)}</textarea></div>`).join('');
     const pageFields = deliverable.carouselPages.map((page, index) => `<div class="carousel-page"><div class="carousel-page-head"><span>P${String(index + 1).padStart(2, '0')}</span><strong>${escapeHtml(page.title)}</strong><small>${escapeHtml(page.hint)}</small></div><textarea name="carousel_${index}">${escapeHtml(page.text)}</textarea></div>`).join('');
     const platformFields = Object.entries(deliverable.platformVersions).map(([platform, text]) => `<div class="platform-version"><div class="platform-version-head"><strong>${platform}</strong><button type="button" class="btn tiny" onclick="copyText(this.previousElementSibling.parentElement.nextElementSibling.value)">複製</button></div><small>${PLATFORM_RULES[platform]}</small><textarea name="platform_${platform}">${escapeHtml(text)}</textarea></div>`).join('');
     const shotFields = deliverable.shots.map((shot, index) => `<div class="shot-row"><span>${shot.shot}</span><input name="shot_${index}_label" value="${escapeHtml(shot.label)}"><input name="shot_${index}_scene" value="${escapeHtml(shot.scene)}"><input name="shot_${index}_action" value="${escapeHtml(shot.action)}"><input name="shot_${index}_check" value="${escapeHtml(shot.check)}"></div>`).join('');
-    return `<form class="delivery-editor" onsubmit="saveDeliverable(event,'${deliverable.id}')"><section class="panel"><div class="section-head"><div><h2>母內容五段式</h2><p>每一段只完成一個任務：讓人停下、感到被理解、學會方法、相信經驗、採取下一步。</p></div><span class="tag blue">${escapeHtml(deliverable.angle)}</span></div><div class="delivery-fields">${segmentFields}</div></section><section class="panel"><div class="section-head"><div><h2>七頁輪播</h2><p>封面不解釋全部；每頁一個重點；最後只保留一個 CTA。</p></div></div><div class="carousel-pages">${pageFields}</div></section><section class="panel"><div class="section-head"><div><h2>四平台改寫</h2><p>核心觀點與案例保持一致，只調整閱讀節奏與 CTA。</p></div></div><div class="platform-versions">${platformFields}</div></section><section class="panel"><div class="section-head"><div><h2>拍攝分鏡表</h2><p>依場景分組，一個場景一次拍完，減少來回換裝與找道具。</p></div></div><div class="shot-table"><div class="shot-row shot-head"><span>SHOT</span><span>段落</span><span>場景與鏡位</span><span>動作／B-roll</span><span>檢查</span></div>${shotFields}</div></section><div class="form-actions"><button class="btn primary">儲存內容交付包</button><button type="button" class="btn danger" onclick="deleteDeliverable('${deliverable.id}')">刪除交付包</button></div></form>`;
+    const ctaField = `<div class="form-field full"><label>CTA 類型</label><select name="ctaType">${ctaTypeOptions(ctaType)}</select><div class="category-helper">${escapeHtml(ctaHint(ctaType))} 內容文字仍可在下方 CTA 段落自行調整。</div></div>`;
+    return `<form class="delivery-editor" onsubmit="saveDeliverable(event,'${deliverable.id}')"><section class="panel"><div class="section-head"><div><h2>母內容五段式</h2><p>每一段只完成一個任務：讓人停下、感到被理解、學會方法、相信經驗、採取下一步。</p></div><span class="tag blue">${escapeHtml(deliverable.angle)}</span></div>${ctaField}<div class="delivery-fields">${segmentFields}</div></section><section class="panel"><div class="section-head"><div><h2>七頁輪播</h2><p>封面不解釋全部；每頁一個重點；最後只保留一個 CTA。</p></div></div><div class="carousel-pages">${pageFields}</div></section><section class="panel"><div class="section-head"><div><h2>四平台改寫</h2><p>核心觀點與案例保持一致，只調整閱讀節奏與 CTA。</p></div></div><div class="platform-versions">${platformFields}</div></section><section class="panel"><div class="section-head"><div><h2>拍攝分鏡表</h2><p>依場景分組，一個場景一次拍完，減少來回換裝與找道具。</p></div></div><div class="shot-table"><div class="shot-row shot-head"><span>SHOT</span><span>段落</span><span>場景與鏡位</span><span>動作／B-roll</span><span>檢查</span></div>${shotFields}</div></section><div class="form-actions"><button class="btn primary">儲存內容交付包</button><button type="button" class="btn danger" onclick="deleteDeliverable('${deliverable.id}')">刪除交付包</button></div></form>`;
   }
 
   function workflow() {
@@ -517,8 +579,8 @@
     const current = state.deliverables.find(item => item.id === window.workflowDeliverableId) || state.deliverables[0];
     const taskDone = state.workflowTasks.filter(task => task.completed).length;
     const taskMarkup = state.workflowTasks.map(task => `<button type="button" class="workflow-task ${task.completed ? 'completed' : ''}" onclick="toggleWorkflowTask('${task.id}')"><span class="task-check">${task.completed ? '✓' : task.day}</span><span><strong>第 ${task.day} 天｜${task.title}</strong><small>${task.detail}</small></span></button>`).join('');
-    const createPanel = topics.length ? `<section class="panel"><div class="section-head"><div><h2>建立內容交付包</h2><p>先選一個題目，再把真實案例與 CTA 補進去。</p></div></div><form onsubmit="createDeliverableFromForm(event)"><div class="form-grid"><div class="form-field full"><label>來源題目</label><select name="topicId" onchange="window.workflowTopicId=this.value">${sourceTopicOptions(selectedId)}</select></div>${field('核心觀點', 'coreMessage', selectedTopic(selectedId)?.differentiation || '', { tag: 'textarea', full: true, placeholder: '這一支內容最後希望讀者記住哪一句？' })}${field('真實案例或前後差異', 'caseText', state.profile.experienceStories?.[0] || '', { tag: 'textarea', full: true, placeholder: '不要讓智慧服務替你編造；沒有資料就先補上。' })}${field('唯一 CTA', 'cta', selectedTopic(selectedId)?.cta || '', { full: true, placeholder: '例如：留言「地圖」拿檢核表' })}</div><div class="form-actions"><button class="btn primary">建立可編輯交付包</button></div></form></section>` : '<div class="empty"><strong>先建立一個題目</strong>有了題目後，才能產出母內容與四平台版本。</div>';
-    const deliverables = state.deliverables.map(item => `<button type="button" class="delivery-list-row ${current?.id === item.id ? 'active' : ''}" onclick="window.workflowDeliverableId='${item.id}';workflow()"><span><strong>${escapeHtml(item.title)}</strong><small>${formatDateTime(item.updatedAt)} · ${escapeHtml(item.angle || '未選切角')}</small></span><em>${item.status === 'READY' ? '已完成' : '草稿'}</em></button>`).join('');
+    const createPanel = topics.length ? `<section class="panel"><div class="section-head"><div><h2>建立內容交付包</h2><p>先選一個題目，再把真實案例與 CTA 補進去。</p></div></div><form onsubmit="createDeliverableFromForm(event)"><div class="form-grid"><div class="form-field full"><label>來源題目</label><select name="topicId" onchange="window.workflowTopicId=this.value">${sourceTopicOptions(selectedId)}</select></div>${field('核心觀點', 'coreMessage', selectedTopic(selectedId)?.differentiation || '', { tag: 'textarea', full: true, placeholder: '這一支內容最後希望讀者記住哪一句？' })}${field('真實案例或前後差異', 'caseText', state.profile.experienceStories?.[0] || '', { tag: 'textarea', full: true, placeholder: '不要讓智慧服務替你編造；沒有資料就先補上。' })}<div class="form-field"><label>CTA 類型</label><select name="ctaType">${ctaTypeOptions(selectedTopic(selectedId)?.ctaType || inferCtaType(selectedTopic(selectedId)?.cta))}</select><div class="category-helper">選一個主要行動；分享與轉發分開記錄。</div></div>${field('唯一 CTA', 'cta', selectedTopic(selectedId)?.cta || '', { full: true, placeholder: '例如：分享給可能需要的朋友' })}</div><div class="form-actions"><button class="btn primary">建立可編輯交付包</button></div></form></section>` : '<div class="empty"><strong>先建立一個題目</strong>有了題目後，才能產出母內容與四平台版本。</div>';
+    const deliverables = state.deliverables.map(item => `<button type="button" class="delivery-list-row ${current?.id === item.id ? 'active' : ''}" onclick="window.workflowDeliverableId='${item.id}';workflow()"><span><strong>${escapeHtml(item.title)}</strong><small>${formatDateTime(item.updatedAt)} · ${escapeHtml(item.angle || '未選切角')} · CTA：${escapeHtml(item.ctaType || '未設定')}</small></span><em>${item.status === 'READY' ? '已完成' : '草稿'}</em></button>`).join('');
     layout('內容工作流', '內容工作流 ／ 從一題走到可拍、可發、可復盤', '把手冊中的「母內容→輪播→短影音→四平台→分鏡」放進同一份交付包；每段都能直接編輯與複製。', `<div class="workflow-layout"><div>${createPanel}${current ? deliverableEditor(current) : '<section class="panel"><div class="empty"><strong>還沒有交付包</strong>建立後會在這裡出現可編輯版本。</div></section>'}</div><aside><section class="panel workflow-week"><div class="section-head"><div><h2>七天啟動計畫</h2><p>已完成 ${taskDone}/7 個交付物</p></div><span class="tag ${taskDone === 7 ? 'sage' : 'blue'}">${Math.round((taskDone / 7) * 100)}%</span></div><div class="workflow-task-list">${taskMarkup}</div></section><section class="panel"><div class="section-head"><div><h2>我的交付包</h2><p>保留每一輪的修改脈絡。</p></div></div><div class="delivery-list">${deliverables || '<div class="muted">尚未建立</div>'}</div></section></aside></div>`);
   }
 
@@ -540,6 +602,7 @@
     const deliverable = state.deliverables.find(item => item.id === id);
     if (!deliverable) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
+    deliverable.ctaType = normalizeCtaType(values.ctaType || deliverable.ctaType);
     deliverable.segments = deliverable.segments.map(segment => ({ ...segment, text: String(values[`segment_${segment.key}`] || '').trim() }));
     deliverable.carouselPages = deliverable.carouselPages.map((page, index) => ({ ...page, text: String(values[`carousel_${index}`] || '').trim() }));
     deliverable.platformVersions = Object.fromEntries(Object.keys(deliverable.platformVersions).map(platform => [platform, String(values[`platform_${platform}`] || '').trim()]));
