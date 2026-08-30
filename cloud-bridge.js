@@ -267,10 +267,27 @@
     const root = document.getElementById('modalRoot');
     if (!root) return;
     const configuredNote = hasConfig ? '使用 Supabase 帳號登入後，資料會在不同裝置同步。' : '目前尚未填入 Supabase URL 與公開金鑰；本機模式仍可使用。';
-    root.innerHTML = `<div class="modal-wrap" data-cloud-modal><div class="modal" style="max-width:460px"><div class="modal-head"><div><h2>${authMode === 'signin' ? '登入雲端藏書閣' : '建立雲端帳號'}</h2><p class="panel-note">${configuredNote}</p></div><button type="button" class="btn icon" data-close-cloud>×</button></div><form id="cloudAuthForm"><div class="form-grid"><div class="form-field full"><label>電子郵件</label><input name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="form-field full"><label>密碼（至少 6 碼）</label><input name="password" type="password" minlength="6" autocomplete="${authMode === 'signin' ? 'current-password' : 'new-password'}" required></div></div><div class="form-actions"><button type="button" class="btn" data-toggle-cloud>${authMode === 'signin' ? '改為建立帳號' : '已有帳號？登入'}</button><button class="btn primary" ${hasConfig ? '' : 'disabled'}>${authMode === 'signin' ? '登入並同步' : '建立帳號'}</button></div></form></div></div>`;
+    root.innerHTML = `<div class="modal-wrap" data-cloud-modal><div class="modal" style="max-width:460px"><div class="modal-head"><div><h2>${authMode === 'signin' ? '登入雲端藏書閣' : '建立雲端帳號'}</h2><p class="panel-note">${configuredNote}</p></div><button type="button" class="btn icon" data-close-cloud>×</button></div><form id="cloudAuthForm"><div class="form-grid"><div class="form-field full"><label>電子郵件</label><input name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="form-field full"><label>密碼（至少 6 碼）</label><input name="password" type="password" minlength="6" autocomplete="${authMode === 'signin' ? 'current-password' : 'new-password'}" required></div></div><div class="form-actions"><button type="button" class="btn" data-toggle-cloud>${authMode === 'signin' ? '改為建立帳號' : '已有帳號？登入'}</button>${authMode === 'signin' ? '<button type="button" class="btn" data-resend-from-signin>重新寄送註冊驗證信</button>' : ''}<button class="btn primary" ${hasConfig ? '' : 'disabled'}>${authMode === 'signin' ? '登入並同步' : '建立帳號'}</button></div></form></div></div>`;
     root.querySelector('[data-close-cloud]').addEventListener('click', () => { root.innerHTML = ''; });
     root.querySelector('.modal-wrap').addEventListener('click', event => { if (event.target === event.currentTarget) root.innerHTML = ''; });
     root.querySelector('[data-toggle-cloud]').addEventListener('click', () => { authMode = authMode === 'signin' ? 'signup' : 'signin'; showAuthModal(); });
+    root.querySelector('[data-resend-from-signin]')?.addEventListener('click', async event => {
+      const emailInput = root.querySelector('input[name="email"]');
+      const email = String(emailInput?.value || '').trim();
+      if (!emailInput?.checkValidity()) {
+        emailInput?.reportValidity();
+        return;
+      }
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        await resendSignupConfirmation(email);
+        notify('新的註冊驗證信已寄出，請使用最新一封。');
+      } catch (error) {
+        notify(error.message || '驗證信重新寄送失敗，請確認這個 Email 曾經註冊過');
+        button.disabled = false;
+      }
+    });
     root.querySelector('#cloudAuthForm').addEventListener('submit', async event => {
       event.preventDefault();
       const button = event.currentTarget.querySelector('button.primary');
