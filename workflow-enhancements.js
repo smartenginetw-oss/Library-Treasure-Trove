@@ -1162,6 +1162,7 @@
       if (typeof enhanceSelects === 'function') enhanceSelects();
       if (typeof enhanceCategoryPicker === 'function') enhanceCategoryPicker();
       if (typeof enhancePlatformPickers === 'function') enhancePlatformPickers();
+      enhanceRadarSearch();
       localizeVisibleText();
     }, 0);
   }
@@ -1184,6 +1185,34 @@
   window.toggleWorkflowTask = toggleWorkflowTask;
   window.copyText = copyText;
   window.saveReview = saveReview;
+
+  function enhanceRadarSearch() {
+    if (route() !== 'radar') return;
+    const filters = document.querySelector('.filters');
+    const input = document.getElementById('radarQ');
+    if (!filters || !input || filters.querySelector('[data-radar-search]')) return;
+    const control = document.createElement('div');
+    control.className = 'radar-search-control';
+    control.dataset.radarSearch = 'true';
+    input.parentNode.insertBefore(control, input);
+    control.appendChild(input);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn radar-search-btn';
+    button.setAttribute('aria-label', '搜尋爆款案例');
+    button.innerHTML = '<span class="radar-search-icon" aria-hidden="true"></span><span>搜尋</span>';
+    button.addEventListener('click', () => {
+      renderRadarRows();
+      input.focus();
+    });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        button.click();
+      }
+    });
+    control.appendChild(button);
+  }
 
   if (window.__bookVault?.mergeCloudState) {
     const legacyMergeCloudState = window.__bookVault.mergeCloudState;
@@ -1222,6 +1251,11 @@
     .workflow-layout{grid-template-columns:minmax(0,1fr)}
   </style>`);
 
+  document.head.insertAdjacentHTML('beforeend', `<style id="radar-search-style">
+    .radar-search-control{display:flex;align-items:center;gap:9px;flex:1;min-width:min(100%,360px)}.radar-search-control input{flex:1;min-width:0}.radar-search-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:9px 16px;border:0;background:#f1f3f3;color:var(--dark);font-weight:500}.radar-search-btn:hover,.radar-search-btn:focus-visible{background:#e7eae9;outline:2px solid var(--soft-blue);outline-offset:2px}.radar-search-icon{position:relative;width:15px;height:15px;border:2px solid currentColor;border-radius:50%;display:inline-block;flex:0 0 15px}.radar-search-icon::after{content:"";position:absolute;width:7px;height:2px;right:-5px;bottom:-2px;background:currentColor;border-radius:2px;transform:rotate(45deg);transform-origin:left center}@media(max-width:760px){.radar-search-control{width:100%;min-width:0}}
+  </style>`);
+
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。
+  setTimeout(enhanceRadarSearch, 0);
   enhancedRender();
 })();
