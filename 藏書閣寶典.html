@@ -189,7 +189,32 @@ function localizeChineseUi() {
       if (node.hasAttribute(attribute)) node.setAttribute(attribute, replace(node.getAttribute(attribute)));
     });
   });
+  const searchInput = document.getElementById('radarQ');
+  if (searchInput) searchInput.placeholder = '搜尋案例、創作者、賽道、平台或網址';
 }
+const originalRenderRadarRows = window.renderRadarRows;
+window.renderRadarRows = function searchableRenderRadarRows() {
+  const query = String(document.getElementById('radarQ')?.value || '').trim().toLocaleLowerCase();
+  const allRows = window.radarRows || [];
+  const searchableRows = query
+    ? allRows.filter(row => [row.title, row.creatorName, row.creatorHandle, row.niche, row.platform, row.summary, row.commentsSample, row.sourceUrl, row.format, row.hookType, row.coverType]
+      .filter(Boolean).join(' ').toLocaleLowerCase().includes(query))
+    : allRows;
+  window.radarRows = searchableRows;
+  if (typeof originalRenderRadarRows === 'function') originalRenderRadarRows();
+  window.radarRows = allRows;
+  const tableBody = document.getElementById('radarRows');
+  let counter = document.getElementById('radarResultCount');
+  if (!counter) {
+    counter = document.createElement('span');
+    counter.id = 'radarResultCount';
+    counter.className = 'muted';
+    document.querySelector('.filters')?.appendChild(counter);
+  }
+  const emptyState = tableBody?.querySelector('.empty');
+  const visibleCount = emptyState ? 0 : (tableBody?.querySelectorAll('tr').length || 0);
+  counter.textContent = query ? `搜尋結果：${visibleCount} 筆` : `共 ${allRows.length} 筆案例`;
+};
 const renderApp = window.render || render;
 if (typeof renderApp === 'function') {
   renderApp();
