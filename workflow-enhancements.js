@@ -1202,74 +1202,6 @@
     }
   }
 
-  function creatorConnectionStatus(connection) {
-    const status = connection.status || 'CONNECTED';
-    const label = status === 'CONNECTED' ? '已連線' : status === 'ERROR' ? '同步失敗' : '已中止';
-    const className = status === 'CONNECTED' ? 'sage' : status === 'ERROR' ? 'pink' : 'blue';
-    const detail = status === 'ERROR' && connection.last_error ? connection.last_error : formatInstagramSyncTime(connection.last_synced_at);
-    return `<span class="tag ${className}">${label}</span><small>${escapeHtml(detail)}</small>`;
-  }
-
-  function renderCreatorConnections(panel, connections) {
-    const list = panel.querySelector('[data-instagram-connections]');
-    if (!list) return;
-    list.innerHTML = connections.length
-      ? connections.map(connection => `<div class="instagram-source-row"><div><strong>${escapeHtml(connection.display_name || `@${connection.username}`)}</strong><small>@${escapeHtml(connection.username)} · ${creatorConnectionStatus(connection)}</small></div><div class="instagram-source-meta"><button type="button" class="btn tiny" data-instagram-connection-sync="${escapeHtml(connection.id)}">同步</button><button type="button" class="btn tiny" data-instagram-disconnect="${escapeHtml(connection.id)}">中止連線</button></div></div>`).join('')
-      : '<div class="empty"><strong>尚未有創作者授權連線</strong>請按「連線 Instagram」，讓創作者本人完成登入與授權。</div>';
-    // Status markup is rendered as text inside the small element, so the list
-    // remains safe even when Meta returns an unexpected profile name.
-    list.querySelectorAll('[data-instagram-disconnect]').forEach(button => button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        await window.cloudStore.disconnectInstagramConnection(button.dataset.instagramDisconnect);
-        panel.querySelector('[data-instagram-connection-status]').textContent = '連線已中止；伺服器不再使用該帳號的 token。';
-        await loadCreatorConnections(panel);
-      } catch (error) {
-        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
-        button.disabled = false;
-      }
-    }));
-    list.querySelectorAll('[data-instagram-connection-sync]').forEach(button => button.addEventListener('click', async () => {
-      button.disabled = true;
-      panel.querySelector('[data-instagram-connection-status]').textContent = '正在同步授權帳號最近內容…';
-      try {
-        const result = await window.cloudStore.syncInstagramConnections();
-        panel.querySelector('[data-instagram-connection-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個帳號失敗。` : `同步完成，新增或更新 ${result.imported || 0} 筆內容。`;
-        await loadCreatorConnections(panel);
-        await window.cloudStore.refreshCloudState?.();
-      } catch (error) {
-        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
-      } finally { button.disabled = false; }
-    }));
-  }
-
-  async function loadCreatorConnections(panel) {
-    const list = panel.querySelector('[data-instagram-connections]');
-    if (!window.cloudStore?.isSignedIn?.()) {
-      list.innerHTML = '<div class="empty"><strong>請先登入雲端</strong>登入後才能建立自己的 Instagram 連線。</div>';
-      return;
-    }
-    try {
-      renderCreatorConnections(panel, await window.cloudStore.listInstagramConnections());
-    } catch (error) {
-      list.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
-    }
-  }
-
-  function showInstagramOAuthResult(panel) {
-    const hash = String(window.location.hash || '');
-    const queryIndex = hash.indexOf('?');
-    if (queryIndex < 0) return;
-    const params = new URLSearchParams(hash.slice(queryIndex + 1));
-    const status = params.get('instagram');
-    if (!status) return;
-    const message = params.get('message');
-    const notice = panel.querySelector('[data-instagram-connection-status]');
-    if (notice) notice.textContent = status === 'connected' ? 'Instagram 已連線；可按「同步授權內容」取得最近貼文。' : `Instagram 連線失敗：${message || '請稍後再試。'}`;
-    // Remove one-time callback details while keeping the current route.
-    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}#/admin/viral-content`);
-  }
-
   function addInstagramSourceModesPanel() {
     if (route() !== 'admin/viral-content') return;
     const content = document.getElementById('appContent');
@@ -1277,43 +1209,8 @@
     const panel = document.createElement('section');
     panel.className = 'panel instagram-source-modes-panel';
     panel.dataset.instagramSourceModes = 'true';
-    panel.innerHTML = `<div class="section-head"><div><h2>Instagram 來源模式</h2><p>選擇由創作者授權連線，或由你手動貼入公開內容。兩種方式都只會放入你的帳號資料。</p></div></div><div class="instagram-mode-tabs" role="tablist"><button type="button" class="instagram-mode-tab active" data-instagram-mode="connected" role="tab" aria-selected="true">創作者授權連線</button><button type="button" class="instagram-mode-tab" data-instagram-mode="manual" role="tab" aria-selected="false">手動匯入</button></div><div data-instagram-view="connected"><div class="notice">創作者本人會在 Meta 授權頁登入專業 Instagram；本系統不收集密碼。沒有公司驗證時，仍受 Meta 標準／測試存取與應用程式權限限制。</div><div class="form-actions instagram-mode-actions"><button type="button" class="btn primary" data-instagram-connect>連線 Instagram</button><button type="button" class="btn" data-instagram-connected-sync>同步授權內容</button></div><div class="notice" data-instagram-connection-status>尚未建立連線。</div><div class="instagram-source-list" data-instagram-connections><div class="empty">讀取授權連線中…</div></div></div><div data-instagram-view="manual" hidden><div class="notice">貼上公開的 Instagram 貼文或 Reel 網址，再補上你看得到的數字；不需要創作者帳號密碼，也不會嘗試繞過 Instagram 隱私限制。</div><div class="notice" data-manual-import-status>手動匯入只會儲存在目前登入者的內容庫。</div><form class="manual-import-form" data-manual-import-form><div class="form-field full"><label>Instagram 貼文／Reel 網址</label><input name="sourceUrl" type="url" placeholder="https://www.instagram.com/reel/..." required /></div><div class="form-field"><label>創作者名稱</label><input name="creatorName" placeholder="例如：Eden 的環球旅行" /></div><div class="form-field"><label>創作者帳號</label><input name="creatorHandle" placeholder="例如：@eden_ey" /></div><div class="form-field"><label>內容標題</label><input name="title" placeholder="例如：台北必吃清單" /></div><div class="form-field"><label>賽道</label><select name="niche">${opt(NICHES, state.profile.primaryNiche)}</select></div><div class="form-field"><label>影片秒數</label><input name="durationSeconds" type="number" min="0" max="86400" /></div><div class="form-field"><label>粉絲數</label><input name="followers" type="number" min="0" /></div><div class="form-field"><label>觀看數</label><input name="views" type="number" min="0" /></div><div class="form-field"><label>按讚數</label><input name="likes" type="number" min="0" /></div><div class="form-field"><label>留言數</label><input name="comments" type="number" min="0" /></div><div class="form-field"><label>轉發數</label><input name="reposts" type="number" min="0" /></div><div class="form-field"><label>分享數</label><input name="shares" type="number" min="0" /></div><div class="form-field full"><label>內容摘要／拆解備註</label><textarea name="summary" placeholder="貼入你觀察到的鉤子、方法、案例或真實證據"></textarea></div><div class="form-field full"><label>留言樣本</label><textarea name="commentsSample" placeholder="一行一則留言"></textarea></div><div class="form-field full"><label>匯入備註</label><textarea name="importNotes" placeholder="例如：影片檔已另存，長度 35 秒"></textarea></div><div class="form-actions full"><button class="btn primary" type="submit">儲存手動匯入</button></div></form></div>`;
+    panel.innerHTML = `<div class="section-head"><div><h2>Instagram 案例匯入</h2><p>案例庫不需要購買客戶授權 Instagram；由管理員整理公開案例，客戶可直接使用。</p></div></div><div class="notice">手動匯入不需要創作者帳號密碼，也不會嘗試繞過 Instagram 隱私限制。貼上公開的 Instagram 貼文或 Reel 網址，再補上你看得到的數字。</div><div class="notice" data-manual-import-status>目前匯入會儲存在登入者的內容庫；要讓所有客戶看到，請由管理員發布到共用案例庫。</div><form class="manual-import-form" data-manual-import-form><div class="form-field full"><label>Instagram 貼文／Reel 網址</label><input name="sourceUrl" type="url" placeholder="https://www.instagram.com/reel/..." required /></div><div class="form-field"><label>創作者名稱</label><input name="creatorName" placeholder="例如：Eden 的環球旅行" /></div><div class="form-field"><label>創作者帳號</label><input name="creatorHandle" placeholder="例如：@eden_ey" /></div><div class="form-field"><label>內容標題</label><input name="title" placeholder="例如：台北必吃清單" /></div><div class="form-field"><label>賽道</label><select name="niche">${opt(NICHES, state.profile.primaryNiche)}</select></div><div class="form-field"><label>影片秒數</label><input name="durationSeconds" type="number" min="0" max="86400" /></div><div class="form-field"><label>粉絲數</label><input name="followers" type="number" min="0" /></div><div class="form-field"><label>觀看數</label><input name="views" type="number" min="0" /></div><div class="form-field"><label>按讚數</label><input name="likes" type="number" min="0" /></div><div class="form-field"><label>留言數</label><input name="comments" type="number" min="0" /></div><div class="form-field"><label>轉發數</label><input name="reposts" type="number" min="0" /></div><div class="form-field"><label>分享數</label><input name="shares" type="number" min="0" /></div><div class="form-field full"><label>內容摘要／拆解備註</label><textarea name="summary" placeholder="貼入你觀察到的鉤子、方法、案例或真實證據"></textarea></div><div class="form-field full"><label>留言樣本</label><textarea name="commentsSample" placeholder="一行一則留言"></textarea></div><div class="form-field full"><label>匯入備註</label><textarea name="importNotes" placeholder="例如：影片檔已另存，長度 35 秒"></textarea></div><div class="form-actions full"><button class="btn primary" type="submit">儲存案例</button></div></form>`;
     content.insertBefore(panel, content.firstChild);
-    const setMode = mode => {
-      panel.querySelectorAll('[data-instagram-mode]').forEach(button => {
-        const active = button.dataset.instagramMode === mode;
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-selected', String(active));
-      });
-      panel.querySelectorAll('[data-instagram-view]').forEach(view => { view.hidden = view.dataset.instagramView !== mode; });
-    };
-    panel.querySelectorAll('[data-instagram-mode]').forEach(button => button.addEventListener('click', () => setMode(button.dataset.instagramMode)));
-    panel.querySelector('[data-instagram-connect]').addEventListener('click', async event => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      panel.querySelector('[data-instagram-connection-status]').textContent = '正在準備 Meta 授權頁…';
-      try {
-        const url = await window.cloudStore.startInstagramAuthorization();
-        if (!url) throw new Error('伺服器沒有回傳授權網址');
-        window.location.assign(url);
-      } catch (error) {
-        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
-        button.disabled = false;
-      }
-    });
-    panel.querySelector('[data-instagram-connected-sync]').addEventListener('click', async event => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      panel.querySelector('[data-instagram-connection-status]').textContent = '正在同步授權帳號最近內容…';
-      try {
-        const result = await window.cloudStore.syncInstagramConnections();
-        panel.querySelector('[data-instagram-connection-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個帳號失敗。` : `同步完成，新增或更新 ${result.imported || 0} 筆內容。`;
-        await loadCreatorConnections(panel);
-        await window.cloudStore.refreshCloudState?.();
-      } catch (error) {
-        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
-      } finally { button.disabled = false; }
-    });
     panel.querySelector('[data-manual-import-form]').addEventListener('submit', async event => {
       event.preventDefault();
       const button = event.target.querySelector('button[type="submit"]');
@@ -1329,8 +1226,6 @@
         panel.querySelector('[data-manual-import-status]').textContent = error.message;
       } finally { button.disabled = false; }
     });
-    showInstagramOAuthResult(panel);
-    loadCreatorConnections(panel);
   }
 
   function addInstagramSyncPanel() {
