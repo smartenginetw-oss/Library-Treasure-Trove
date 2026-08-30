@@ -26,6 +26,18 @@
     { value: '轉發', label: '轉發', hint: '轉發到限時動態或其他社群。', fallback: '轉發給一起創作或旅行的夥伴。' },
     { value: '無直接 CTA', label: '無直接 CTA', hint: '用觀點或情緒收尾，不要求下一步。', fallback: '' }
   ];
+  // 這份清單只供前端顯示；真正可用的模型仍由 API 端白名單再次驗證。
+  const OPENAI_MODEL_OPTIONS = [
+    { value: '', label: '部署預設模型', detail: '使用部署端 OPENAI_MODEL（目前預設 GPT-4o Mini）' },
+    { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', detail: '品質優先，適合複雜內容整理' },
+    { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', detail: '品質與成本平衡' },
+    { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', detail: '大量產出與成本優先' },
+    { value: 'gpt-5.5', label: 'GPT-5.5', detail: '專業內容產出' },
+    { value: 'gpt-5.4', label: 'GPT-5.4', detail: '穩定推理與內容改寫' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', detail: '速度與成本優先' },
+    { value: 'gpt-4o', label: 'GPT-4o', detail: '成熟的多模態模型' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini', detail: '快速、經濟' }
+  ];
   const WORKFLOW_KEYS = ['demand', 'saveValue', 'evidence', 'conversion', 'effort'];
   const WORKFLOW_LABELS = {
     demand: '需求強度',
@@ -154,6 +166,15 @@
     return `<div class="cta-type-options" role="group" aria-label="CTA 類型">${options.map(option => `<label><input type="checkbox" name="ctaTypes" value="${escapeHtml(option.value)}" ${values.includes(option.value) ? 'checked' : ''} onchange="toggleCtaTypeCheckbox(this)"><span>${escapeHtml(option.label)}</span></label>`).join('')}</div>`;
   }
 
+  function modelLabel(value) {
+    return OPENAI_MODEL_OPTIONS.find(option => option.value === value)?.label || String(value || '部署預設模型');
+  }
+
+  function modelSelect(selected = '') {
+    const value = String(selected || '');
+    return `<div class="form-field full"><label for="workflowModel">產出模型</label><select id="workflowModel" name="model">${OPENAI_MODEL_OPTIONS.map(option => `<option value="${escapeHtml(option.value)}" ${option.value === value ? 'selected' : ''}>${escapeHtml(option.label)}${option.detail ? `｜${escapeHtml(option.detail)}` : ''}</option>`).join('')}</select><div class="category-helper">模型會影響母內容、逐字稿、貼文文案、潤稿說明、七頁輪播、四平台版本與五鏡頭分鏡；實際使用的模型會記錄在交付包。</div></div>`;
+  }
+
   function ctaShotAction(value) {
     const actions = {
       留言: '指向留言區並示範關鍵字',
@@ -255,7 +276,8 @@
         transcript: withoutLegacyCtaType.transcript || reels,
         caption: withoutLegacyCtaType.caption || withoutLegacyCtaType.title || '',
         polishNotes: Array.isArray(withoutLegacyCtaType.polishNotes) ? withoutLegacyCtaType.polishNotes : [],
-        generationSource: withoutLegacyCtaType.generationSource || 'rule'
+        generationSource: withoutLegacyCtaType.generationSource || 'rule',
+        modelUsed: String(withoutLegacyCtaType.modelUsed || '')
       };
     });
     state.reviews ||= [];
@@ -628,7 +650,8 @@
       carouselPages,
       platformVersions,
       shots,
-      status: 'DRAFT'
+      status: 'DRAFT',
+      modelUsed: ''
     };
   }
 
@@ -639,9 +662,9 @@
     const platformFields = Object.entries(deliverable.platformVersions).map(([platform, text]) => `<div class="platform-version"><div class="platform-version-head"><strong>${platform}</strong><button type="button" class="btn tiny" onclick="copyText(this.previousElementSibling.parentElement.nextElementSibling.value)">複製</button></div><small>${PLATFORM_RULES[platform]}</small><textarea name="platform_${platform}">${escapeHtml(text)}</textarea></div>`).join('');
     const shotFields = deliverable.shots.map((shot, index) => `<div class="shot-row"><span>${shot.shot}</span><input name="shot_${index}_label" value="${escapeHtml(shot.label)}"><input name="shot_${index}_scene" value="${escapeHtml(shot.scene)}"><input name="shot_${index}_action" value="${escapeHtml(shot.action)}"><input name="shot_${index}_check" value="${escapeHtml(shot.check)}"></div>`).join('');
     const ctaField = `<div class="form-field full"><label>CTA 類型</label>${ctaTypesOptions(ctaTypes)}<div class="category-helper">${escapeHtml(ctaHint(ctaTypes))} 內容文字仍可在下方 CTA 段落自行調整。</div></div>`;
-    const sourceLabel = deliverable.generationSource === 'openai' ? 'OpenAI 智慧文案' : '本機規則式草稿';
+    const sourceLabel = deliverable.generationSource === 'openai' ? `OpenAI 智慧文案 · ${modelLabel(deliverable.modelUsed)}` : '本機規則式草稿';
     const polishNotes = Array.isArray(deliverable.polishNotes) ? deliverable.polishNotes.join('\n') : '';
-    return `<form class="delivery-editor" onsubmit="saveDeliverable(event,'${deliverable.id}')"><section class="panel"><div class="section-head"><div><h2>母內容五段式</h2><p>每一段只完成一個任務：讓人停下、感到被理解、學會方法、相信經驗、採取下一步。</p></div><div><span class="tag blue">${escapeHtml(deliverable.angle)}</span><span class="tag ${deliverable.generationSource === 'openai' ? 'sage' : ''}">${sourceLabel}</span></div></div>${ctaField}<div class="delivery-copy-fields"><div class="delivery-copy-field"><label>逐字稿</label><textarea name="transcript" placeholder="可直接照著念的短影音逐字稿">${escapeHtml(deliverable.transcript || '')}</textarea></div><div class="delivery-copy-field"><label>貼文文案</label><textarea name="caption" placeholder="社群貼文說明與主要行動邀請">${escapeHtml(deliverable.caption || '')}</textarea></div><div class="delivery-copy-field full"><label>潤稿說明</label><textarea name="polishNotes" placeholder="每行一項：語氣、節奏、證據與原創邊界的修改說明">${escapeHtml(polishNotes)}</textarea></div></div><div class="delivery-fields">${segmentFields}</div></section><section class="panel"><div class="section-head"><div><h2>七頁輪播</h2><p>封面不解釋全部；每頁一個重點；最後只保留一個 CTA。</p></div></div><div class="carousel-pages">${pageFields}</div></section><section class="panel"><div class="section-head"><div><h2>四平台改寫</h2><p>核心觀點與案例保持一致，只調整閱讀節奏與 CTA。</p></div></div><div class="platform-versions">${platformFields}</div></section><section class="panel"><div class="section-head"><div><h2>拍攝分鏡表</h2><p>依場景分組，一個場景一次拍完，減少來回換裝與找道具。</p></div></div><div class="shot-table"><div class="shot-row shot-head"><span>SHOT</span><span>段落</span><span>場景與鏡位</span><span>動作／B-roll</span><span>檢查</span></div>${shotFields}</div></section><div class="form-actions"><button class="btn primary">儲存內容交付包</button><button type="button" class="btn danger" onclick="deleteDeliverable('${deliverable.id}')">刪除交付包</button></div></form>`;
+    return `<form class="delivery-editor" onsubmit="saveDeliverable(event,'${deliverable.id}')"><section class="panel"><div class="section-head"><div><h2>母內容五段式</h2><p>每一段只完成一個任務：讓人停下、感到被理解、學會方法、相信經驗、採取下一步。</p></div><div><span class="tag blue">${escapeHtml(deliverable.angle)}</span><span class="tag ${deliverable.generationSource === 'openai' ? 'sage' : ''}">${escapeHtml(sourceLabel)}</span></div></div>${ctaField}<div class="delivery-copy-fields"><div class="delivery-copy-field"><label>逐字稿</label><textarea name="transcript" placeholder="可直接照著念的短影音逐字稿">${escapeHtml(deliverable.transcript || '')}</textarea></div><div class="delivery-copy-field"><label>貼文文案</label><textarea name="caption" placeholder="社群貼文說明與主要行動邀請">${escapeHtml(deliverable.caption || '')}</textarea></div><div class="delivery-copy-field full"><label>潤稿說明</label><textarea name="polishNotes" placeholder="每行一項：語氣、節奏、證據與原創邊界的修改說明">${escapeHtml(polishNotes)}</textarea></div></div><div class="delivery-fields">${segmentFields}</div></section><section class="panel"><div class="section-head"><div><h2>七頁輪播</h2><p>封面不解釋全部；每頁一個重點；最後只保留一個 CTA。</p></div></div><div class="carousel-pages">${pageFields}</div></section><section class="panel"><div class="section-head"><div><h2>四平台改寫</h2><p>核心觀點與案例保持一致，只調整閱讀節奏與 CTA。</p></div></div><div class="platform-versions">${platformFields}</div></section><section class="panel"><div class="section-head"><div><h2>拍攝分鏡表</h2><p>依場景分組，一個場景一次拍完，減少來回換裝與找道具。</p></div></div><div class="shot-table"><div class="shot-row shot-head"><span>SHOT</span><span>段落</span><span>場景與鏡位</span><span>動作／B-roll</span><span>檢查</span></div>${shotFields}</div></section><div class="form-actions"><button class="btn primary">儲存內容交付包</button><button type="button" class="btn danger" onclick="deleteDeliverable('${deliverable.id}')">刪除交付包</button></div></form>`;
   }
 
   function workflow() {
@@ -651,8 +674,8 @@
     const current = state.deliverables.find(item => item.id === window.workflowDeliverableId) || state.deliverables[0];
     const taskDone = state.workflowTasks.filter(task => task.completed).length;
     const taskMarkup = state.workflowTasks.map(task => `<button type="button" class="workflow-task ${task.completed ? 'completed' : ''}" onclick="toggleWorkflowTask('${task.id}')"><span class="task-check">${task.completed ? '✓' : task.day}</span><span><strong>第 ${task.day} 天｜${task.title}</strong><small>${task.detail}</small></span></button>`).join('');
-    const createPanel = topics.length ? `<section class="panel"><div class="section-head"><div><h2>建立內容交付包</h2><p>先選一個題目，再把真實案例與 CTA 補進去。</p></div></div><form onsubmit="createDeliverableFromForm(event)"><div class="form-grid"><div class="form-field full"><label>來源題目</label><select name="topicId" onchange="window.workflowTopicId=this.value">${sourceTopicOptions(selectedId)}</select></div>${field('核心觀點', 'coreMessage', selectedTopic(selectedId)?.differentiation || '', { tag: 'textarea', full: true, placeholder: '這一支內容最後希望讀者記住哪一句？' })}${field('真實案例或前後差異', 'caseText', state.profile.experienceStories?.[0] || '', { tag: 'textarea', full: true, placeholder: '不要讓智慧服務替你編造；沒有資料就先補上。' })}<div class="form-field full"><label>CTA 類型</label>${ctaTypesOptions(selectedTopic(selectedId)?.ctaTypes || selectedTopic(selectedId)?.ctaType || inferCtaTypes(selectedTopic(selectedId)?.cta))}<div class="category-helper">可選 1–3 個；勾選順序即主要 CTA 到次要 CTA，分享與轉發分開記錄。</div></div>${field('CTA 文字', 'cta', selectedTopic(selectedId)?.cta || '', { full: true, placeholder: '例如：分享給可能需要的朋友；留言「關鍵字」取得清單' })}</div><div class="notice">已登入且部署端設定智慧服務金鑰時，按下後會送到 OpenAI 產出文案、逐字稿與分鏡；服務不可用時會明確標示為本機規則式草稿。</div><div class="form-actions"><button class="btn primary">送出並產生內容交付包</button></div></form></section>` : '<div class="empty"><strong>先建立一個題目</strong>有了題目後，才能產出母內容與四平台版本。</div>';
-    const deliverables = state.deliverables.map(item => `<button type="button" class="delivery-list-row ${current?.id === item.id ? 'active' : ''}" onclick="window.workflowDeliverableId='${item.id}';workflow()"><span><strong>${escapeHtml(item.title)}</strong><small>${formatDateTime(item.updatedAt)} · ${escapeHtml(item.angle || '未選切角')} · CTA：${escapeHtml(ensureCtaTypes(item.ctaTypes || item.ctaType).join('、') || '未設定')}</small></span><em>${item.status === 'READY' ? '已完成' : '草稿'}</em></button>`).join('');
+    const createPanel = topics.length ? `<section class="panel"><div class="section-head"><div><h2>建立內容交付包</h2><p>先選一個題目，再把真實案例與 CTA 補進去。</p></div></div><form onsubmit="createDeliverableFromForm(event)"><div class="form-grid"><div class="form-field full"><label>來源題目</label><select name="topicId" onchange="window.workflowTopicId=this.value">${sourceTopicOptions(selectedId)}</select></div>${modelSelect(window.workflowModel || '')}${field('核心觀點', 'coreMessage', selectedTopic(selectedId)?.differentiation || '', { tag: 'textarea', full: true, placeholder: '這一支內容最後希望讀者記住哪一句？' })}${field('真實案例或前後差異', 'caseText', state.profile.experienceStories?.[0] || '', { tag: 'textarea', full: true, placeholder: '不要讓智慧服務替你編造；沒有資料就先補上。' })}<div class="form-field full"><label>CTA 類型</label>${ctaTypesOptions(selectedTopic(selectedId)?.ctaTypes || selectedTopic(selectedId)?.ctaType || inferCtaTypes(selectedTopic(selectedId)?.cta))}<div class="category-helper">可選 1–3 個；勾選順序即主要 CTA 到次要 CTA，分享與轉發分開記錄。</div></div>${field('CTA 文字', 'cta', selectedTopic(selectedId)?.cta || '', { full: true, placeholder: '例如：分享給可能需要的朋友；留言「關鍵字」取得清單' })}</div><div class="notice">已登入且部署端設定智慧服務金鑰時，按下後會送到 OpenAI 產出文案、逐字稿與分鏡；服務不可用時會明確標示為本機規則式草稿。模型權限仍以部署端 OpenAI 專案可用性為準。</div><div class="form-actions"><button class="btn primary">送出並產生內容交付包</button></div></form></section>` : '<div class="empty"><strong>先建立一個題目</strong>有了題目後，才能產出母內容與四平台版本。</div>';
+    const deliverables = state.deliverables.map(item => `<button type="button" class="delivery-list-row ${current?.id === item.id ? 'active' : ''}" onclick="window.workflowDeliverableId='${item.id}';workflow()"><span><strong>${escapeHtml(item.title)}</strong><small>${formatDateTime(item.updatedAt)} · ${escapeHtml(item.angle || '未選切角')} · ${item.modelUsed ? `模型：${escapeHtml(modelLabel(item.modelUsed))} · ` : ''}CTA：${escapeHtml(ensureCtaTypes(item.ctaTypes || item.ctaType).join('、') || '未設定')}</small></span><em>${item.status === 'READY' ? '已完成' : '草稿'}</em></button>`).join('');
     layout('內容工作流', '內容工作流 ／ 從一題走到可拍、可發、可復盤', '把手冊中的「母內容→輪播→短影音→四平台→分鏡」放進同一份交付包；每段都能直接編輯與複製。', `<div class="workflow-layout"><div>${createPanel}${current ? deliverableEditor(current) : '<section class="panel"><div class="empty"><strong>還沒有交付包</strong>建立後會在這裡出現可編輯版本。</div></section>'}</div><aside><section class="panel workflow-week"><div class="section-head"><div><h2>七天啟動計畫</h2><p>已完成 ${taskDone}/7 個交付物</p></div><span class="tag ${taskDone === 7 ? 'sage' : 'blue'}">${Math.round((taskDone / 7) * 100)}%</span></div><div class="workflow-task-list">${taskMarkup}</div></section><section class="panel"><div class="section-head"><div><h2>我的交付包</h2><p>保留每一輪的修改脈絡。</p></div></div><div class="delivery-list">${deliverables || '<div class="muted">尚未建立</div>'}</div></section></aside></div>`);
   }
 
@@ -662,6 +685,7 @@
     const formData = new FormData(event.currentTarget);
     const values = Object.fromEntries(formData);
     values.ctaTypes = formData.getAll('ctaTypes');
+    window.workflowModel = String(values.model || '');
     const topic = selectedTopic(values.topicId);
     if (!topic) return;
     const submit = form.querySelector('button[type="submit"], button:not([type])');
@@ -682,7 +706,8 @@
           caseText: values.caseText,
           ctaTypes: values.ctaTypes,
           cta: values.cta,
-          angle: topic.angle
+          angle: topic.angle,
+          model: values.model
         });
         if (!deliverable?.id) throw new Error('智慧服務沒有回傳有效的內容交付包');
         deliverable.generationSource = 'openai';

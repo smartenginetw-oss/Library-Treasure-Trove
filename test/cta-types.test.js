@@ -24,7 +24,8 @@ test('deliverable rows write canonical cta_types and remove legacy payload key',
 });
 
 test('deliverable rows preserve primary-to-secondary CTA order and cap at three', () => {
-  const row = deliverableRow({ id: 'd2', title: '多 CTA', ctaTypes: ['轉發', '留言', '分享', '購買'] }, 'user-1');
+  const row = deliverableRow({ id: 'd2', title: '多 CTA', ctaTypes: ['轉發', '留言', '分享', '購買'], modelUsed: 'gpt-5.6-sol' }, 'user-1');
   assert.deepEqual(row.cta_types, ['轉發', '留言', '分享']);
   assert.deepEqual(row.payload.ctaTypes, ['轉發', '留言', '分享']);
+  assert.equal(row.payload.modelUsed, 'gpt-5.6-sol');
 });

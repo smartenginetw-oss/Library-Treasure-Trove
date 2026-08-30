@@ -2,6 +2,7 @@ import { authenticateRequest } from './_lib/supabase.js';
 import { deliverableRow } from './_lib/deliverable.js';
 import { buildPrompt, deliverableInput, deliverableSchema, validateOutput } from './_lib/generate-deliverable.js';
 import { json, methodNotAllowed, readJson, setJsonHeaders } from './_lib/http.js';
+import { resolveOpenAIModel } from './_lib/openai-models.js';
 
 function errorResponse(res, error) {
   return json(res, error.status || 500, { error: error.code || 'SERVER_ERROR', message: error.message || '伺服器發生錯誤' });
@@ -14,7 +15,9 @@ export default async function handler(req, res) {
   try {
     const { client, user } = await authenticateRequest(req);
     if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('尚未設定伺服器端智慧服務金鑰'), { code: 'AI_NOT_CONFIGURED', status: 503 });
-    const input = deliverableInput(readJson(req));
+    const body = readJson(req);
+    const input = deliverableInput(body);
+    const model = resolveOpenAIModel(body.model);
     if (!input.topic.title) throw Object.assign(new Error('請先選擇一個有效的智慧選題'), { code: 'TOPIC_REQUIRED', status: 400 });
     if (!input.coreMessage) input.coreMessage = input.topic.differentiation || input.topic.hook || input.topic.title;
     if (!input.caseText) input.caseText = input.profile.experienceStories[0] || '請補上你的真實案例、對話、數字或前後差異。';
@@ -23,8 +26,8 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-        temperature: 0.7,
+        model,
+        ...(model.startsWith('gpt-4o') ? { temperature: 0.7 } : {}),
         messages: [{ role: 'system', content: '你是一個重視原創、證據邊界與可拍攝性的繁體中文內容總編。' }, { role: 'user', content: buildPrompt(input) }],
         response_format: { type: 'json_schema', json_schema: { name: 'content_deliverable', strict: true, schema: deliverableSchema } }
       })
@@ -50,6 +53,7 @@ export default async function handler(req, res) {
       title: output.title || input.topic.title,
       angle: output.angle || input.angle,
       generationSource: 'openai',
+      modelUsed: model,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };

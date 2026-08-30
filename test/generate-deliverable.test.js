@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPrompt, deliverableInput, validateOutput } from '../api/_lib/generate-deliverable.js';
+import { configuredOpenAIModel, OPENAI_MODEL_IDS, resolveOpenAIModel } from '../api/_lib/openai-models.js';
 
 const segmentKeys = ['hook', 'pain', 'method', 'case', 'cta'];
 const pageKeys = ['cover', 'resonance', 'framework', 'method', 'case', 'check', 'cta'];
@@ -58,4 +59,19 @@ test('deliverable output rejects missing transcript or malformed sequence', () =
   const wrongOrder = validOutput();
   wrongOrder.segments[0].key = 'pain';
   assert.throws(() => validateOutput(wrongOrder), error => error.code === 'AI_INVALID_OUTPUT');
+});
+
+test('OpenAI model resolver accepts the supported model IDs and records a safe default', () => {
+  assert.deepEqual(OPENAI_MODEL_IDS, [
+    'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5',
+    'gpt-5.4', 'gpt-5.4-mini', 'gpt-4o', 'gpt-4o-mini'
+  ]);
+  assert.equal(resolveOpenAIModel('gpt-5.6-sol', {}), 'gpt-5.6-sol');
+  assert.equal(configuredOpenAIModel({ OPENAI_MODEL: 'gpt-5.6-terra' }), 'gpt-5.6-terra');
+  assert.equal(configuredOpenAIModel({ OPENAI_MODEL: 'not-a-model' }), 'gpt-4o-mini');
+  assert.equal(resolveOpenAIModel('', { OPENAI_MODEL: 'gpt-5.4-mini' }), 'gpt-5.4-mini');
+});
+
+test('OpenAI model resolver rejects IDs outside the server allowlist', () => {
+  assert.throws(() => resolveOpenAIModel('gpt-unknown', {}), error => error.code === 'MODEL_NOT_ALLOWED' && error.status === 400);
 });

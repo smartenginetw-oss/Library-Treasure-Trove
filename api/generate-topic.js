@@ -1,5 +1,6 @@
 import { authenticateRequest } from './_lib/supabase.js';
 import { json, methodNotAllowed, readJson, setJsonHeaders, stringArray, stringValue } from './_lib/http.js';
+import { configuredOpenAIModel } from './_lib/openai-models.js';
 
 const topicSchema = {
   type: 'object',
@@ -115,6 +116,7 @@ export default async function handler(req, res) {
     const { client, user } = await authenticateRequest(req);
     if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('尚未設定伺服器端智慧服務金鑰'), { code: 'AI_NOT_CONFIGURED', status: 503 });
     const input = topicInput(readJson(req));
+    const model = configuredOpenAIModel();
     const prompt = [
       '你是「藏書閣寶典」的內容策略顧問。請以繁體中文產生一個原創選題。',
       '只能借鑑來源案例的內容結構、受眾心理與流量機制，不得複製來源標題、句子、人物、故事或具體情節。',
@@ -128,8 +130,8 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-        temperature: 0.7,
+        model,
+        ...(model.startsWith('gpt-4o') ? { temperature: 0.7 } : {}),
         messages: [{ role: 'system', content: '你是一個嚴謹、重視原創邊界的內容策略顧問。' }, { role: 'user', content: prompt }],
         response_format: { type: 'json_schema', json_schema: { name: 'content_topic', strict: true, schema: topicSchema } }
       })
