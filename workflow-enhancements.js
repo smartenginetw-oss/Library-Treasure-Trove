@@ -1531,7 +1531,7 @@
     const panel = document.createElement('section');
     panel.className = 'panel instagram-sync-panel';
     panel.dataset.instagramSyncPanel = 'true';
-    panel.innerHTML = `<div class="section-head"><div><h2>Instagram 自動同步</h2><p>每日 11:00（台灣時間）由伺服器更新最近貼文；也可立即同步。</p></div><button type="button" class="btn primary" data-instagram-sync>立即同步</button></div><div class="notice" data-instagram-sync-status>需要先在部署平台設定 Instagram API 憑證；不需要創作者密碼，只會在伺服器端使用 token。</div><form class="instagram-source-form" data-instagram-source-form><div class="form-field"><label>Instagram 帳號</label><input name="username" placeholder="例如：ray_eat_food" required /></div><div class="form-field"><label>顯示名稱</label><input name="displayName" placeholder="例如：陳芃芃的美食天地" /></div><div class="form-field"><label>賽道</label><select name="niche">${opt(NICHES, state.profile.primaryNiche)}</select></div><div class="form-actions"><button class="btn" type="submit">加入監測</button></div></form><div class="instagram-source-list" data-instagram-sources><div class="empty">讀取監測帳號中…</div></div>`;
+    panel.innerHTML = `<div class="section-head"><div><h2>Instagram 自動同步</h2><p>每日 11:00（台灣時間）由伺服器逐頁同步可取得的公開 Reels；也可立即同步。</p></div><button type="button" class="btn primary" data-instagram-sync>立即同步</button></div><div class="notice" data-instagram-sync-status>需要先在部署平台設定 Instagram API 憑證；不需要創作者密碼，只會在伺服器端使用 token。</div><form class="instagram-source-form" data-instagram-source-form><div class="form-field"><label>Instagram 帳號</label><input name="username" placeholder="例如：ray_eat_food" required /></div><div class="form-field"><label>顯示名稱</label><input name="displayName" placeholder="例如：陳芃芃的美食天地" /></div><div class="form-field"><label>賽道</label><select name="niche">${opt(NICHES, state.profile.primaryNiche)}</select></div><div class="form-actions"><button class="btn" type="submit">加入監測</button></div></form><div class="instagram-source-list" data-instagram-sources><div class="empty">讀取監測帳號中…</div></div>`;
     content.insertBefore(panel, content.firstChild);
     panel.querySelector('[data-instagram-source-form]').addEventListener('submit', async event => {
       event.preventDefault();
@@ -1555,7 +1555,8 @@
       panel.querySelector('[data-instagram-sync-status]').textContent = '正在向 Instagram API 取得最新資料…';
       try {
         const result = await window.cloudStore.instagramSync();
-        panel.querySelector('[data-instagram-sync-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個來源失敗；請查看各帳號狀態。` : `同步完成，新增或更新 ${result.imported || 0} 筆案例。`;
+        const truncated = result.truncatedSources?.length ? `；${result.truncatedSources.join('、')} 已達本次分頁上限，仍可能有更早內容未讀取` : '';
+        panel.querySelector('[data-instagram-sync-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個來源失敗；請查看各帳號狀態。${truncated}` : `同步完成，新增或更新 ${result.imported || 0} 筆 Reels。${truncated}`;
         await window.cloudStore.refreshCloudState?.();
       } catch (error) {
         panel.querySelector('[data-instagram-sync-status]').textContent = error.message;
