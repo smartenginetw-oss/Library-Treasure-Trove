@@ -5,10 +5,44 @@
   const config = window.SUPABASE_CONFIG || {};
   let client = null;
   let hasConfig = Boolean(config.url && config.anonKey && window.supabase?.createClient);
+  // Keep the same key Supabase uses by default, but make the browser storage
+  // explicit so session persistence does not depend on an environment default.
+  const authStorageKey = (() => {
+    try {
+      return `sb-${new URL(config.url).hostname.split('.')[0]}-auth-token`;
+    } catch {
+      return 'library-treasure-trove-auth-token';
+    }
+  })();
+  function authStorage() {
+    try {
+      const storage = window.localStorage;
+      const probe = '__library_treasure_trove_storage_probe__';
+      storage.setItem(probe, '1');
+      storage.removeItem(probe);
+      return storage;
+    } catch {
+      // Some privacy modes and file:// pages deny localStorage. Keep auth
+      // operations functional in that case; normal HTTPS/HTTP deployments use
+      // localStorage and survive refreshes and tab changes.
+      const memory = new Map();
+      return {
+        getItem: key => memory.has(key) ? memory.get(key) : null,
+        setItem: (key, value) => memory.set(key, String(value)),
+        removeItem: key => memory.delete(key)
+      };
+    }
+  }
   if (hasConfig) {
     try {
       client = window.supabase.createClient(config.url, config.anonKey, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storageKey: authStorageKey,
+          storage: authStorage()
+        }
       });
     } catch (error) {
       hasConfig = false;
@@ -18,6 +52,7 @@
   const apiBase = String(config.apiBase || '').replace(/\/$/, '');
   let app = null;
   let session = null;
+  let authReady = !client;
   let syncTimer = null;
   let authMode = 'signin';
 
@@ -331,8 +366,14 @@
   function refreshAuthControl() {
     const button = document.querySelector('[data-cloud-auth]');
     if (!button) return;
-    button.textContent = session?.user ? `已登入：${session.user.email}` : (hasConfig ? '登入雲端' : '設定雲端');
-    button.title = hasConfig ? '登入、登出與跨裝置同步' : '請先填入 supabase-config.js';
+    const restoring = Boolean(client && !authReady);
+    button.disabled = restoring;
+    button.textContent = restoring
+      ? '正在恢復登入…'
+      : (session?.user ? `已登入：${session.user.email}` : (hasConfig ? '登入雲端' : '設定雲端'));
+    button.title = restoring
+      ? '正在讀取已儲存的登入狀態'
+      : (hasConfig ? '登入、登出與跨裝置同步' : '請先填入 supabase-config.js');
   }
 
   function updateModeNotice() {
@@ -348,24 +389,40 @@
   async function boot() {
     addAuthControl();
     updateModeNotice();
-    if (!client) return;
-    clearAuthErrorFromUrl();
-    const current = await client.auth.getSession();
-    session = current.data.session;
+    if (!client) {
+      authReady = true;
+      refreshAuthControl();
+      return;
+    }
+    authReady = false;
     refreshAuthControl();
-    updateModeNotice();
-    if (session) {
-      try {
-        const remote = await pullState();
-        if (remote && app?.mergeCloudState) app.mergeCloudState(remote);
-        else if (app) await syncState(app.getState());
-      } catch (error) {
-        console.warn('[cloud hydrate]', error.message);
-        notify('雲端資料讀取失敗，先保留本機資料。');
+    try {
+      clearAuthErrorFromUrl();
+      const current = await client.auth.getSession();
+      if (current.error) throw current.error;
+      session = current.data.session;
+      if (session) {
+        try {
+          const remote = await pullState();
+          if (remote && app?.mergeCloudState) app.mergeCloudState(remote);
+          else if (app) await syncState(app.getState());
+        } catch (error) {
+          console.warn('[cloud hydrate]', error.message);
+          notify('雲端資料讀取失敗，先保留本機資料。');
+        }
       }
+    } catch (error) {
+      session = null;
+      console.warn('[cloud auth restore]', error.message);
+      notify('登入狀態讀取失敗，請確認瀏覽器允許此網站保存資料。');
+    } finally {
+      authReady = true;
+      refreshAuthControl();
+      updateModeNotice();
     }
     client.auth.onAuthStateChange((_event, nextSession) => {
       session = nextSession;
+      authReady = true;
       refreshAuthControl();
       updateModeNotice();
       if (session && app) pullState().then(remote => remote ? app.mergeCloudState(remote) : syncState(app.getState())).catch(error => console.warn('[cloud auth sync]', error.message));
