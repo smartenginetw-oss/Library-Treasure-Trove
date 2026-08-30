@@ -1164,6 +1164,7 @@
       if (typeof enhancePlatformPickers === 'function') enhancePlatformPickers();
       enhanceRadarSearch();
       localizeVisibleText();
+      localizeRadarNotice();
     }, 0);
   }
 
@@ -1212,6 +1213,16 @@
       }
     });
     control.appendChild(button);
+  }
+
+  // 雷達頁的評估模型說明是在舊版模板中以整段字串產生，
+  // 可能在一般可見文字掃描後才插入；這裡在每次渲染完成後補上中文版本。
+  function localizeRadarNotice() {
+    if (route() !== 'radar') return;
+    const notice = '內部評估模型：觀看／粉絲 25％、速度 20％、按讚／觀看 15％、留言／觀看 10％、新鮮度 10％、重複格式成功度 10％、賽道吻合度 10％。跨圈層案例依觀看／粉絲與設定門檻判斷，非只依總觀看。';
+    document.querySelectorAll('#appContent .notice').forEach(node => {
+      if (node.textContent.includes('內部評估模型')) node.textContent = notice;
+    });
   }
 
   if (window.__bookVault?.mergeCloudState) {
