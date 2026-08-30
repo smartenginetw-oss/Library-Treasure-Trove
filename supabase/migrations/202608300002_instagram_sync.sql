@@ -62,7 +62,8 @@ insert into public.instagram_monitored_creators (username, display_name, niche, 
 values
   ('ray_eat_food', '陳芃芃的美食天地', 'Food', 'https://www.instagram.com/ray_eat_food/'),
   ('77.food', '巨鳥胃77', 'Food', 'https://www.instagram.com/77.food/'),
-  ('iris.love.food', '瑞斯', 'Food', 'https://www.instagram.com/iris.love.food/')
+  ('iris.love.food', '瑞斯', 'Food', 'https://www.instagram.com/iris.love.food/'),
+  ('eden_ey', 'Eden的環球旅行', 'Travel', 'https://www.instagram.com/eden_ey/')
 on conflict (username) do update
 set display_name = excluded.display_name,
     niche = excluded.niche,
