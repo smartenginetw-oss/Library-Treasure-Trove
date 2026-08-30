@@ -26,6 +26,27 @@
     else console.info(`[藏書閣寶典] ${message}`);
   }
 
+  function authRedirectUrl() {
+    const url = new URL(window.location.href);
+    // Auth emails should return to the app root, not carry a stale route or
+    // an auth error fragment into the next session.
+    url.hash = '';
+    return url.toString();
+  }
+
+  function clearAuthErrorFromUrl() {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const code = params.get('error_code');
+    if (!code) return false;
+    const description = params.get('error_description') || '';
+    const message = code === 'otp_expired'
+      ? '驗證連結已過期或已使用，請重新寄送驗證信，再點擊最新一封。'
+      : `驗證失敗：${description || code}`;
+    notify(message);
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+    return true;
+  }
+
   function rowToTopic(row) {
     const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
     return {
@@ -201,13 +222,45 @@
   async function authRequest(mode, email, password) {
     if (!client) throw new Error('尚未設定 Supabase 前端連線資訊');
     if (mode === 'signup') {
-      const { data, error } = await client.auth.signUp({ email, password });
+      const { data, error } = await client.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: authRedirectUrl() }
+      });
       if (error) throw error;
       return data;
     }
     const { data, error } = await client.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
+  }
+
+  async function resendSignupConfirmation(email) {
+    if (!client) throw new Error('尚未設定 Supabase 前端連線資訊');
+    const { error } = await client.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: authRedirectUrl() }
+    });
+    if (error) throw error;
+  }
+
+  function showVerificationPending(root, email) {
+    root.innerHTML = `<div class="modal-wrap" data-cloud-modal><div class="modal" style="max-width:460px"><div class="modal-head"><div><h2>請確認電子郵件</h2><p class="panel-note">驗證信已寄到 ${escapeHtml(email)}。請只點擊最新一封信中的連結一次。</p></div><button type="button" class="btn icon" data-close-cloud>×</button></div><div class="notice">如果看到「Email link is invalid or has expired」，代表連結已過期或被信箱安全掃描器先使用。</div><div class="form-actions"><button type="button" class="btn" data-resend-signup>重新寄送驗證信</button><button type="button" class="btn primary" data-back-to-signin>返回登入</button></div></div></div>`;
+    root.querySelector('[data-close-cloud]').addEventListener('click', () => { root.innerHTML = ''; });
+    root.querySelector('.modal-wrap').addEventListener('click', event => { if (event.target === event.currentTarget) root.innerHTML = ''; });
+    root.querySelector('[data-back-to-signin]').addEventListener('click', () => { authMode = 'signin'; showAuthModal(); });
+    root.querySelector('[data-resend-signup]').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        await resendSignupConfirmation(email);
+        notify('新的驗證信已寄出，請使用最新一封。');
+      } catch (error) {
+        notify(error.message || '驗證信重新寄送失敗，請稍後再試');
+        button.disabled = false;
+      }
+    });
   }
 
   function showAuthModal() {
@@ -224,10 +277,10 @@
       button.disabled = true;
       try {
         const form = new FormData(event.currentTarget);
-        const result = await authRequest(authMode, String(form.get('email')).trim(), String(form.get('password')));
+        const email = String(form.get('email')).trim();
+        const result = await authRequest(authMode, email, String(form.get('password')));
         if (authMode === 'signup' && !result.session) {
-          notify('帳號已建立，請先到信箱完成驗證，再回來登入。');
-          root.innerHTML = '';
+          showVerificationPending(root, email);
         } else {
           notify('已登入雲端，正在同步資料。');
           root.innerHTML = '';
@@ -276,6 +329,7 @@
     addAuthControl();
     updateModeNotice();
     if (!client) return;
+    clearAuthErrorFromUrl();
     const current = await client.auth.getSession();
     session = current.data.session;
     refreshAuthControl();
@@ -336,5 +390,8 @@
       await boot();
     }
   };
-  window.addEventListener('hashchange', () => setTimeout(updateModeNotice, 0));
+  window.addEventListener('hashchange', () => setTimeout(() => {
+    clearAuthErrorFromUrl();
+    updateModeNotice();
+  }, 0));
 })();
