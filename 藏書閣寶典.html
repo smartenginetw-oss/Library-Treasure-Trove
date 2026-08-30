@@ -182,7 +182,10 @@ window.opt = function localizedOptions(list, current, includeBlank = false) {
 function localizeChineseUi() {
   const replace = value => Object.keys(UI_LABELS).sort((a, b) => b.length - a.length).reduce((text, key) => text.split(key).join(UI_LABELS[key]), value);
   document.querySelectorAll('option, .custom-select-option, th, td, label, button, a, h1, h2, h3, h4, p, span, small, strong, em, div').forEach(node => {
-    if (node.children.length === 0 && node.textContent) node.textContent = replace(node.textContent);
+    if (node.children.length === 0 && node.textContent) {
+      const localized = replace(node.textContent);
+      if (localized !== node.textContent) node.textContent = localized;
+    }
   });
   document.querySelectorAll('input, textarea, select').forEach(node => {
     ['placeholder', 'aria-label', 'title'].forEach(attribute => {
@@ -192,6 +195,7 @@ function localizeChineseUi() {
   const searchInput = document.getElementById('radarQ');
   if (searchInput) searchInput.placeholder = '搜尋案例、創作者、賽道、平台或網址';
 }
+window.addEventListener('hashchange', () => setTimeout(localizeChineseUi, 50));
 const originalRenderRadarRows = window.renderRadarRows;
 window.renderRadarRows = function searchableRenderRadarRows() {
   const query = String(document.getElementById('radarQ')?.value || '').trim().toLocaleLowerCase();
@@ -215,6 +219,53 @@ window.renderRadarRows = function searchableRenderRadarRows() {
   const visibleCount = emptyState ? 0 : (tableBody?.querySelectorAll('tr').length || 0);
   counter.textContent = query ? `搜尋結果：${visibleCount} 筆` : `共 ${allRows.length} 筆案例`;
 };
+const originalTopicDraft = window.topicDraft;
+function removeDuplicateFormulaPrefix(value, code) {
+  let subject = String(value || '').trim();
+  const prefix = `${code}式：`;
+  while (subject.startsWith(prefix)) subject = subject.slice(prefix.length).trim();
+  return subject;
+}
+if (typeof originalTopicDraft === 'function') {
+  window.topicDraft = function localizedTopicDraft(input = {}) {
+    const code = input.code || '受眾';
+    return originalTopicDraft({ ...input, subject: removeDuplicateFormulaPrefix(input.subject, code) });
+  };
+}
+const originalRenderGeneratedTopic = window.renderGeneratedTopic;
+const TOPIC_FIELD_LABELS = {
+  title: '題目',
+  targetAudience: '目標受眾',
+  contentTheme: '內容主題',
+  trafficCodes: '流量密碼',
+  hook: '開場鉤子',
+  hookType: '鉤子類型',
+  whyItWorks: '有效原因',
+  contentStructure: '內容結構',
+  cta: '行動邀請',
+  seriesIdeas: '系列延伸',
+  differentiation: '差異化',
+  copyingRisk: '複製風險',
+  viralPotential: '爆款潛力'
+};
+if (typeof originalRenderGeneratedTopic === 'function') {
+  window.renderGeneratedTopic = function localizedGeneratedTopic(topic, box, sourceLabel) {
+    const normalizedTopic = { ...topic };
+    const code = normalizedTopic.trafficCodes?.[0] || '';
+    normalizedTopic.title = normalizedTopic.title
+      ? normalizedTopic.title.replace(new RegExp(`^(?:${code}式：)+`), `${code}式：`)
+      : normalizedTopic.title;
+    originalRenderGeneratedTopic(normalizedTopic, box, sourceLabel);
+    const pre = box?.querySelector('pre');
+    if (pre) {
+      const display = Object.fromEntries(Object.entries(TOPIC_FIELD_LABELS)
+        .filter(([key]) => normalizedTopic[key] !== undefined)
+        .map(([key, label]) => [label, normalizedTopic[key]]));
+      pre.textContent = JSON.stringify(display, null, 2);
+    }
+    setTimeout(localizeChineseUi, 0);
+  };
+}
 const renderApp = window.render || render;
 if (typeof renderApp === 'function') {
   renderApp();
