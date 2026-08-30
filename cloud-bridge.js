@@ -176,6 +176,44 @@
     return { ...payloadWithoutLegacyCtaType, ctaTypes, id: row.id, topicId: row.topic_id, title: row.title, angle: row.angle, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at };
   }
 
+  function rowToManualImport(row) {
+    return {
+      id: `manual_${row.id}`,
+      title: row.title || row.source_url || 'Instagram 手動匯入',
+      creatorName: row.creator_name || '未提供創作者',
+      creatorHandle: row.creator_handle || '',
+      platform: row.platform || 'Instagram',
+      niche: row.niche || '未分類',
+      followers: row.followers,
+      views: row.views,
+      likes: row.likes,
+      comments: row.comments,
+      durationSeconds: row.duration_seconds,
+      reposts: row.reposts,
+      shares: row.shares,
+      velocity: null,
+      freshness: null,
+      repeatedFormat: null,
+      trafficCodes: [],
+      hookType: '',
+      coverType: '',
+      format: row.connection_id ? 'Instagram 授權同步' : 'Instagram 手動匯入',
+      summary: row.summary || '',
+      commentsSample: row.comments_sample || '',
+      importNotes: row.import_notes || '',
+      sourceUrl: row.source_url,
+      instagramMediaId: row.instagram_media_id || null,
+      instagramSourceId: row.connection_id || null,
+      publishedAt: row.published_at || null,
+      lastSyncedAt: row.last_synced_at || null,
+      syncSource: row.connection_id ? 'instagram_oauth' : 'manual_import',
+      archived: false,
+      publishDate: row.published_at || row.created_at,
+      createdAt: row.created_at,
+      manualImportId: row.id
+    };
+  }
+
   function rowToReview(row) {
     const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
     return { ...payload, id: row.id, topicId: row.topic_id, topicTitle: row.topic_title, publishedAt: row.published_at, reviewDueAt: row.review_due_at, reach: row.reach, watchTime: row.watch_time, saves: row.saves, shares: row.shares, dms: row.dms, variable: row.variable, diagnosis: row.diagnosis, nextTest: row.next_test, createdAt: row.created_at };
@@ -188,20 +226,21 @@
 
   async function pullState() {
     if (!client || !session?.user) return null;
-    const [profileResult, topicsResult, formulasResult, savedResult, viralsResult, deliverablesResult, reviewsResult, tasksResult] = await Promise.all([
+    const [profileResult, topicsResult, formulasResult, savedResult, viralsResult, manualImportsResult, deliverablesResult, reviewsResult, tasksResult] = await Promise.all([
       client.from('creator_profiles').select('*').maybeSingle(),
       client.from('topics').select('*').order('updated_at', { ascending: false }),
       client.from('formulas').select('*').order('updated_at', { ascending: false }),
       client.from('saved_viral_contents').select('viral_content_id'),
       client.from('viral_contents').select('*').eq('archived', false).order('created_at', { ascending: false }),
+      client.from('manual_content_imports').select('*').order('created_at', { ascending: false }),
       client.from('content_deliverables').select('*').order('updated_at', { ascending: false }),
       client.from('content_reviews').select('*').order('created_at', { ascending: false }),
       client.from('workflow_tasks').select('*').order('day', { ascending: true })
     ]);
-    const firstError = [profileResult, topicsResult, formulasResult, savedResult, viralsResult, deliverablesResult, reviewsResult, tasksResult].find(result => result.error);
+    const firstError = [profileResult, topicsResult, formulasResult, savedResult, viralsResult, manualImportsResult, deliverablesResult, reviewsResult, tasksResult].find(result => result.error);
     if (firstError) throw firstError.error;
     // 公開案例不代表這個帳號已經有雲端資料；新帳號應先上傳本機狀態。
-    const hasRemoteUserData = Boolean(profileResult.data || topicsResult.data?.length || formulasResult.data?.length || savedResult.data?.length || deliverablesResult.data?.length || reviewsResult.data?.length || tasksResult.data?.length);
+    const hasRemoteUserData = Boolean(profileResult.data || topicsResult.data?.length || formulasResult.data?.length || savedResult.data?.length || manualImportsResult.data?.length || deliverablesResult.data?.length || reviewsResult.data?.length || tasksResult.data?.length);
     if (!hasRemoteUserData) return null;
     const profile = profileResult.data ? {
       name: profileResult.data.display_name,
@@ -229,7 +268,8 @@
       topics: (topicsResult.data || []).map(rowToTopic),
       formulas: (formulasResult.data || []).map(rowToFormula),
       savedViralIds: (savedResult.data || []).map(row => row.viral_content_id),
-      virals: (viralsResult.data || []).map(rowToViral),
+      // 公開案例與這個帳號自己的匯入案例並列；手動匯入不寫入全域 viral_contents。
+      virals: [...(viralsResult.data || []).map(rowToViral), ...(manualImportsResult.data || []).map(rowToManualImport)],
       deliverables: (deliverablesResult.data || []).map(rowToDeliverable),
       reviews: (reviewsResult.data || []).map(rowToReview),
       workflowTasks: (tasksResult.data || []).map(rowToWorkflowTask)
@@ -504,6 +544,73 @@
     return payload;
   }
 
+  async function startInstagramAuthorization() {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能連線 Instagram');
+    const response = await fetch(`${apiBase}/api/instagram-auth?action=start`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Instagram 授權連線暫時無法使用');
+    return payload.authorizationUrl;
+  }
+
+  async function listInstagramConnections() {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能查看 Instagram 連線');
+    const response = await fetch(`${apiBase}/api/instagram-auth?action=connections`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Instagram 授權連線讀取失敗');
+    return payload.connections || [];
+  }
+
+  async function disconnectInstagramConnection(id) {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能中止 Instagram 連線');
+    const response = await fetch(`${apiBase}/api/instagram-auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'disconnect', id })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Instagram 連線中止失敗');
+    return payload.connection;
+  }
+
+  async function createManualImport(input) {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能手動匯入內容');
+    const response = await fetch(`${apiBase}/api/manual-imports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify(input)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || '手動匯入失敗');
+    return payload.import;
+  }
+
+  async function listManualImports() {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能查看手動匯入');
+    const response = await fetch(`${apiBase}/api/manual-imports`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || '手動匯入讀取失敗');
+    return payload.imports || [];
+  }
+
+  async function deleteManualImport(id) {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能刪除手動匯入');
+    const response = await fetch(`${apiBase}/api/manual-imports?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${session.access_token}` } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || '手動匯入刪除失敗');
+    return payload;
+  }
+
+  async function syncInstagramConnections() {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能同步已授權 Instagram');
+    const response = await fetch(`${apiBase}/api/instagram-connected-sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok && response.status !== 207) throw new Error(payload.message || 'Instagram 授權同步失敗');
+    return payload;
+  }
+
   async function getHealth() {
     const response = await fetch(`${apiBase}/api/health`, { cache: 'no-store' });
     const payload = await response.json().catch(() => ({}));
@@ -529,6 +636,13 @@
     listInstagramSources,
     saveInstagramSource,
     instagramSync,
+    startInstagramAuthorization,
+    listInstagramConnections,
+    disconnectInstagramConnection,
+    createManualImport,
+    listManualImports,
+    deleteManualImport,
+    syncInstagramConnections,
     getHealth,
     refreshCloudState,
     queueSync,

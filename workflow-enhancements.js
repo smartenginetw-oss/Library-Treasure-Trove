@@ -1142,7 +1142,7 @@
     if (!content || content.querySelector('[data-workflow-summary]')) return;
     content.insertAdjacentHTML('beforeend', `<section class="panel workflow-summary" data-workflow-summary><div class="section-head"><div><h2>手冊工作流進度</h2><p>把定位、題庫、交付與復盤串成下一個可執行動作。</p></div><span class="tag ${completion.complete ? 'sage' : 'pink'}">定位 ${completion.done}/${completion.total}</span></div><div class="workflow-summary-grid"><button type="button" onclick="navigate('positioning')"><strong>定位資料卡</strong><small>補齊三支柱與素材邊界</small></button><button type="button" onclick="navigate('topic-scoring')"><strong>題目評分</strong><small>五項條件排出製作順序</small></button><button type="button" onclick="navigate('workflow')"><strong>內容交付包</strong><small>母內容、輪播、四平台、分鏡</small></button><button type="button" onclick="navigate('reviews')"><strong>復盤實驗</strong><small>${dueCount ? `有 ${dueCount} 筆待處理` : '發布後 48–72 小時回來記錄'}</small></button></div></section>`);
   };
-  admin = function () { legacyAdmin(); addInstagramSyncPanel(); };
+  admin = function () { legacyAdmin(); addInstagramSourceModesPanel(); addInstagramSyncPanel(); };
   enhanceTopicDraft();
 
   function formatInstagramSyncTime(value) {
@@ -1200,6 +1200,137 @@
     } catch {
       notice.textContent = '正在檢查 Instagram API 設定；不需要創作者密碼，只會在伺服器端使用 token。';
     }
+  }
+
+  function creatorConnectionStatus(connection) {
+    const status = connection.status || 'CONNECTED';
+    const label = status === 'CONNECTED' ? '已連線' : status === 'ERROR' ? '同步失敗' : '已中止';
+    const className = status === 'CONNECTED' ? 'sage' : status === 'ERROR' ? 'pink' : 'blue';
+    const detail = status === 'ERROR' && connection.last_error ? connection.last_error : formatInstagramSyncTime(connection.last_synced_at);
+    return `<span class="tag ${className}">${label}</span><small>${escapeHtml(detail)}</small>`;
+  }
+
+  function renderCreatorConnections(panel, connections) {
+    const list = panel.querySelector('[data-instagram-connections]');
+    if (!list) return;
+    list.innerHTML = connections.length
+      ? connections.map(connection => `<div class="instagram-source-row"><div><strong>${escapeHtml(connection.display_name || `@${connection.username}`)}</strong><small>@${escapeHtml(connection.username)} · ${creatorConnectionStatus(connection)}</small></div><div class="instagram-source-meta"><button type="button" class="btn tiny" data-instagram-connection-sync="${escapeHtml(connection.id)}">同步</button><button type="button" class="btn tiny" data-instagram-disconnect="${escapeHtml(connection.id)}">中止連線</button></div></div>`).join('')
+      : '<div class="empty"><strong>尚未有創作者授權連線</strong>請按「連線 Instagram」，讓創作者本人完成登入與授權。</div>';
+    // Status markup is rendered as text inside the small element, so the list
+    // remains safe even when Meta returns an unexpected profile name.
+    list.querySelectorAll('[data-instagram-disconnect]').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await window.cloudStore.disconnectInstagramConnection(button.dataset.instagramDisconnect);
+        panel.querySelector('[data-instagram-connection-status]').textContent = '連線已中止；伺服器不再使用該帳號的 token。';
+        await loadCreatorConnections(panel);
+      } catch (error) {
+        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
+        button.disabled = false;
+      }
+    }));
+    list.querySelectorAll('[data-instagram-connection-sync]').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      panel.querySelector('[data-instagram-connection-status]').textContent = '正在同步授權帳號最近內容…';
+      try {
+        const result = await window.cloudStore.syncInstagramConnections();
+        panel.querySelector('[data-instagram-connection-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個帳號失敗。` : `同步完成，新增或更新 ${result.imported || 0} 筆內容。`;
+        await loadCreatorConnections(panel);
+        await window.cloudStore.refreshCloudState?.();
+      } catch (error) {
+        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
+      } finally { button.disabled = false; }
+    }));
+  }
+
+  async function loadCreatorConnections(panel) {
+    const list = panel.querySelector('[data-instagram-connections]');
+    if (!window.cloudStore?.isSignedIn?.()) {
+      list.innerHTML = '<div class="empty"><strong>請先登入雲端</strong>登入後才能建立自己的 Instagram 連線。</div>';
+      return;
+    }
+    try {
+      renderCreatorConnections(panel, await window.cloudStore.listInstagramConnections());
+    } catch (error) {
+      list.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  function showInstagramOAuthResult(panel) {
+    const hash = String(window.location.hash || '');
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex < 0) return;
+    const params = new URLSearchParams(hash.slice(queryIndex + 1));
+    const status = params.get('instagram');
+    if (!status) return;
+    const message = params.get('message');
+    const notice = panel.querySelector('[data-instagram-connection-status]');
+    if (notice) notice.textContent = status === 'connected' ? 'Instagram 已連線；可按「同步授權內容」取得最近貼文。' : `Instagram 連線失敗：${message || '請稍後再試。'}`;
+    // Remove one-time callback details while keeping the current route.
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}#/admin/viral-content`);
+  }
+
+  function addInstagramSourceModesPanel() {
+    if (route() !== 'admin/viral-content') return;
+    const content = document.getElementById('appContent');
+    if (!content || content.querySelector('[data-instagram-source-modes]')) return;
+    const panel = document.createElement('section');
+    panel.className = 'panel instagram-source-modes-panel';
+    panel.dataset.instagramSourceModes = 'true';
+    panel.innerHTML = `<div class="section-head"><div><h2>Instagram 來源模式</h2><p>選擇由創作者授權連線，或由你手動貼入公開內容。兩種方式都只會放入你的帳號資料。</p></div></div><div class="instagram-mode-tabs" role="tablist"><button type="button" class="instagram-mode-tab active" data-instagram-mode="connected" role="tab" aria-selected="true">創作者授權連線</button><button type="button" class="instagram-mode-tab" data-instagram-mode="manual" role="tab" aria-selected="false">手動匯入</button></div><div data-instagram-view="connected"><div class="notice">創作者本人會在 Meta 授權頁登入專業 Instagram；本系統不收集密碼。沒有公司驗證時，仍受 Meta 標準／測試存取與應用程式權限限制。</div><div class="form-actions instagram-mode-actions"><button type="button" class="btn primary" data-instagram-connect>連線 Instagram</button><button type="button" class="btn" data-instagram-connected-sync>同步授權內容</button></div><div class="notice" data-instagram-connection-status>尚未建立連線。</div><div class="instagram-source-list" data-instagram-connections><div class="empty">讀取授權連線中…</div></div></div><div data-instagram-view="manual" hidden><div class="notice">貼上公開的 Instagram 貼文或 Reel 網址，再補上你看得到的數字；不需要創作者帳號密碼，也不會嘗試繞過 Instagram 隱私限制。</div><div class="notice" data-manual-import-status>手動匯入只會儲存在目前登入者的內容庫。</div><form class="manual-import-form" data-manual-import-form><div class="form-field full"><label>Instagram 貼文／Reel 網址</label><input name="sourceUrl" type="url" placeholder="https://www.instagram.com/reel/..." required /></div><div class="form-field"><label>創作者名稱</label><input name="creatorName" placeholder="例如：Eden 的環球旅行" /></div><div class="form-field"><label>創作者帳號</label><input name="creatorHandle" placeholder="例如：@eden_ey" /></div><div class="form-field"><label>內容標題</label><input name="title" placeholder="例如：台北必吃清單" /></div><div class="form-field"><label>賽道</label><select name="niche">${opt(NICHES, state.profile.primaryNiche)}</select></div><div class="form-field"><label>影片秒數</label><input name="durationSeconds" type="number" min="0" max="86400" /></div><div class="form-field"><label>粉絲數</label><input name="followers" type="number" min="0" /></div><div class="form-field"><label>觀看數</label><input name="views" type="number" min="0" /></div><div class="form-field"><label>按讚數</label><input name="likes" type="number" min="0" /></div><div class="form-field"><label>留言數</label><input name="comments" type="number" min="0" /></div><div class="form-field"><label>轉發數</label><input name="reposts" type="number" min="0" /></div><div class="form-field"><label>分享數</label><input name="shares" type="number" min="0" /></div><div class="form-field full"><label>內容摘要／拆解備註</label><textarea name="summary" placeholder="貼入你觀察到的鉤子、方法、案例或真實證據"></textarea></div><div class="form-field full"><label>留言樣本</label><textarea name="commentsSample" placeholder="一行一則留言"></textarea></div><div class="form-field full"><label>匯入備註</label><textarea name="importNotes" placeholder="例如：影片檔已另存，長度 35 秒"></textarea></div><div class="form-actions full"><button class="btn primary" type="submit">儲存手動匯入</button></div></form></div>`;
+    content.insertBefore(panel, content.firstChild);
+    const setMode = mode => {
+      panel.querySelectorAll('[data-instagram-mode]').forEach(button => {
+        const active = button.dataset.instagramMode === mode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+      });
+      panel.querySelectorAll('[data-instagram-view]').forEach(view => { view.hidden = view.dataset.instagramView !== mode; });
+    };
+    panel.querySelectorAll('[data-instagram-mode]').forEach(button => button.addEventListener('click', () => setMode(button.dataset.instagramMode)));
+    panel.querySelector('[data-instagram-connect]').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      panel.querySelector('[data-instagram-connection-status]').textContent = '正在準備 Meta 授權頁…';
+      try {
+        const url = await window.cloudStore.startInstagramAuthorization();
+        if (!url) throw new Error('伺服器沒有回傳授權網址');
+        window.location.assign(url);
+      } catch (error) {
+        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
+        button.disabled = false;
+      }
+    });
+    panel.querySelector('[data-instagram-connected-sync]').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      panel.querySelector('[data-instagram-connection-status]').textContent = '正在同步授權帳號最近內容…';
+      try {
+        const result = await window.cloudStore.syncInstagramConnections();
+        panel.querySelector('[data-instagram-connection-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個帳號失敗。` : `同步完成，新增或更新 ${result.imported || 0} 筆內容。`;
+        await loadCreatorConnections(panel);
+        await window.cloudStore.refreshCloudState?.();
+      } catch (error) {
+        panel.querySelector('[data-instagram-connection-status]').textContent = error.message;
+      } finally { button.disabled = false; }
+    });
+    panel.querySelector('[data-manual-import-form]').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.target.querySelector('button[type="submit"]');
+      button.disabled = true;
+      panel.querySelector('[data-manual-import-status]').textContent = '手動匯入儲存後會出現在爆款雷達…';
+      try {
+        const values = Object.fromEntries(new FormData(event.target));
+        await window.cloudStore.createManualImport(values);
+        event.target.reset();
+        panel.querySelector('[data-manual-import-status]').textContent = '手動匯入已儲存；現在可到爆款雷達搜尋與拆解。';
+        await window.cloudStore.refreshCloudState?.();
+      } catch (error) {
+        panel.querySelector('[data-manual-import-status]').textContent = error.message;
+      } finally { button.disabled = false; }
+    });
+    showInstagramOAuthResult(panel);
+    loadCreatorConnections(panel);
   }
 
   function addInstagramSyncPanel() {
@@ -1376,6 +1507,10 @@
 
   document.head.insertAdjacentHTML('beforeend', `<style id="instagram-sync-style">
     .instagram-sync-panel{margin:0 0 18px}.instagram-source-form{display:grid;grid-template-columns:1.1fr 1.1fr .8fr auto;gap:10px;align-items:end;margin:14px 0}.instagram-source-form .form-field{margin:0}.instagram-source-list{display:grid;gap:7px}.instagram-source-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fffdfa}.instagram-source-row>div:first-child{display:grid;gap:2px;min-width:0}.instagram-source-row strong{font-size:12px}.instagram-source-row small{color:var(--gray);font-size:10px}.instagram-source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.instagram-source-meta small{white-space:nowrap}.instagram-sync-panel [data-instagram-sync-status]{margin:0}.instagram-sync-panel .section-head{margin-top:0}@media(max-width:760px){.instagram-source-form{grid-template-columns:1fr 1fr}.instagram-source-form .form-actions{grid-column:1/-1}.instagram-source-row{align-items:flex-start;flex-direction:column}.instagram-source-meta{justify-content:flex-start}}
+  </style>`);
+
+  document.head.insertAdjacentHTML('beforeend', `<style id="instagram-source-modes-style">
+    .instagram-source-modes-panel{margin:0 0 18px}.instagram-mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0 13px;border-bottom:1px solid var(--line);padding-bottom:10px}.instagram-mode-tab{border:1px solid var(--line);border-radius:999px;background:#fffdfa;color:var(--medium);padding:9px 15px;font-size:12px;font-weight:700;cursor:pointer}.instagram-mode-tab:hover,.instagram-mode-tab.active{border-color:var(--pink);background:var(--light-pink);color:var(--dark)}.instagram-mode-actions{display:flex;gap:9px;flex-wrap:wrap;margin:13px 0}.instagram-source-modes-panel [data-instagram-connection-status],.instagram-source-modes-panel [data-manual-import-status]{margin:10px 0}.manual-import-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.manual-import-form .form-field{margin:0}.manual-import-form .form-field.full{grid-column:1/-1}.manual-import-form textarea{min-height:84px}.instagram-source-modes-panel [hidden]{display:none!important}@media(max-width:760px){.manual-import-form{grid-template-columns:1fr}.manual-import-form .form-field.full{grid-column:auto}.instagram-mode-actions{align-items:stretch;flex-direction:column}.instagram-mode-actions .btn{width:100%}}
   </style>`);
 
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。

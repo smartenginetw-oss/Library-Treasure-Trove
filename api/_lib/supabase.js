@@ -52,6 +52,12 @@ export function envStatus() {
     supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY),
     openai: Boolean(process.env.OPENAI_API_KEY),
     instagram: Boolean(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID),
+    instagramOAuth: Boolean(
+      (process.env.INSTAGRAM_META_APP_ID || process.env.INSTAGRAM_OAUTH_CLIENT_ID) &&
+      (process.env.INSTAGRAM_META_APP_SECRET || process.env.INSTAGRAM_OAUTH_CLIENT_SECRET) &&
+      process.env.INSTAGRAM_OAUTH_STATE_SECRET &&
+      process.env.INSTAGRAM_OAUTH_ENCRYPTION_KEY
+    ),
     cron: Boolean(process.env.CRON_SECRET)
   };
 }
