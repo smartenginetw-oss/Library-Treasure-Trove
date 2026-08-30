@@ -118,6 +118,82 @@ window.date = function safeDate(value) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? '—' : new Intl.DateTimeFormat('zh-TW', { month: 'numeric', day: 'numeric' }).format(parsed);
 };
-if (typeof render === 'function' && route() === 'radar') render();
+const UI_LABELS = {
+  'CONTENT STRATEGY SYSTEM': '內容策略系統',
+  'AI 選題': '智慧選題',
+  'Food': '美食',
+  'Travel': '旅遊',
+  'Lifestyle': '生活風格',
+  'Fashion': '時尚',
+  'Beauty': '美容保養',
+  'Fitness/Wellness': '健身／身心健康',
+  'Money': '理財',
+  'Tech/AI': '科技／人工智慧',
+  'Creator': '創作者',
+  'Comedy': '喜劇',
+  'Education': '教育',
+  'Pets': '寵物',
+  'Followers': '粉絲數',
+  'Views': '觀看次數',
+  'V/F': '觀看／粉絲',
+  'Like/V': '按讚／觀看',
+  'Comment/V': '留言／觀看',
+  'Views / Followers': '觀看／粉絲',
+  'Views/Followers': '觀看／粉絲',
+  'Like/View': '按讚／觀看',
+  'Comment/View': '留言／觀看',
+  'Repeated Format Success': '重複格式成功度',
+  'Niche Match': '賽道吻合度',
+  'Velocity': '速度',
+  'Freshness': '新鮮度',
+  'OUTLIER': '跨圈層',
+  'Viral Score': '爆款評估分數',
+  'AI Analyze': '智慧分析',
+  'AI API': '智慧服務介面',
+  'JSON Schema': '固定格式規範',
+  'JSON': '結構化格式',
+  'Authentication': '登入驗證',
+  'RLS': '資料庫權限規則',
+  'Hook': '開場鉤子',
+  'Problem / Setup': '問題／設定',
+  'Process': '過程',
+  'Result': '結果',
+  'Ending / CTA': '結尾／行動邀請',
+  'CTA': '行動邀請',
+  'Vlog 實測': '實測紀錄',
+  'Reels': '短影音',
+  'SHOT': '鏡頭',
+  'B-roll': '補充畫面',
+  'Instagram': 'Instagram 社群',
+  'TikTok': 'TikTok 短影音',
+  'YouTube Shorts': 'YouTube 短影音',
+  'Threads': 'Threads 貼文',
+  'IDEA': '靈感中',
+  'SAVED': '已收藏',
+  'PLANNED': '準備拍攝',
+  'FILMED': '已拍攝',
+  'PUBLISHED': '已發布',
+  'ARCHIVED': '已封存'
+};
+const uiLabel = value => UI_LABELS[value] || value;
+window.opt = function localizedOptions(list, current, includeBlank = false) {
+  return (includeBlank ? '<option value="">全部</option>' : '') + list.map(value => `<option value="${escapeHtml(value)}" ${value === current ? 'selected' : ''}>${escapeHtml(uiLabel(value))}</option>`).join('');
+};
+function localizeChineseUi() {
+  const replace = value => Object.keys(UI_LABELS).sort((a, b) => b.length - a.length).reduce((text, key) => text.split(key).join(UI_LABELS[key]), value);
+  document.querySelectorAll('option, .custom-select-option, th, td, label, button, a, h1, h2, h3, h4, p, span, small, strong, em, div').forEach(node => {
+    if (node.children.length === 0 && node.textContent) node.textContent = replace(node.textContent);
+  });
+  document.querySelectorAll('input, textarea, select').forEach(node => {
+    ['placeholder', 'aria-label', 'title'].forEach(attribute => {
+      if (node.hasAttribute(attribute)) node.setAttribute(attribute, replace(node.getAttribute(attribute)));
+    });
+  });
+}
+if (typeof render === 'function') {
+  render();
+  setTimeout(localizeChineseUi, 0);
+  setTimeout(localizeChineseUi, 50);
+}
 </script>
 </body></html>
