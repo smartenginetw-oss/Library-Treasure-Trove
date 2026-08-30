@@ -1270,14 +1270,24 @@
     if (BULK_NUMBER_FIELDS.has(key)) {
       const time = /^(\d{1,3}):(\d{1,2})$/.exec(text);
       if (key === 'durationSeconds' && time) return Number(time[1]) * 60 + Number(time[2]);
-      const unit = /^([\d.]+)\s*(億|萬|千|B|M|K)$/i.exec(text.replace(/,/g, ''));
+      const numericText = text.replace(/(?:位粉絲|粉絲|按讚|讚|留言|觀看|次|則)$/u, '').trim();
+      const unit = /^([\d.]+)\s*(億|萬|千|B|M|K)$/i.exec(numericText.replace(/,/g, ''));
       if (unit) {
         const multiplier = { '億': 100000000, '萬': 10000, '千': 1000, B: 1000000000, M: 1000000, K: 1000 }[unit[2].toUpperCase()] || 1;
         return String(Number(unit[1]) * multiplier);
       }
-      return text.replace(/,/g, '').replace(/秒$/i, '');
+      return numericText.replace(/,/g, '').replace(/秒$/i, '');
     }
     return text;
+  }
+
+  function bulkMetricFields(value) {
+    const metricKeys = ['views', 'likes', 'comments', 'followers', 'reposts', 'shares'];
+    const output = {};
+    String(value ?? '').split(/[\/／|｜]/).slice(0, metricKeys.length).forEach((item, index) => {
+      output[metricKeys[index]] = bulkRowValue(metricKeys[index], item);
+    });
+    return output;
   }
 
   function normalizeBulkObject(input) {
@@ -1286,10 +1296,7 @@
       const key = bulkHeaderKey(rawKey);
       if (!key) return;
       if (key === 'metricsBundle') {
-        const metricKeys = ['views', 'likes', 'comments', 'followers', 'reposts', 'shares'];
-        String(value ?? '').split(/[\/／|｜]/).slice(0, metricKeys.length).forEach((item, index) => {
-          output[metricKeys[index]] = bulkRowValue(metricKeys[index], item);
-        });
+        Object.assign(output, bulkMetricFields(value));
         return;
       }
       output[key] = key === 'trafficCodes' && Array.isArray(value)
@@ -1301,7 +1308,7 @@
     return output;
   }
 
-  function parseBulkCsv(text) {
+  function parseBulkCsv(text, delimiter = ',') {
     const rows = [];
     let row = [];
     let field = '';
@@ -1314,7 +1321,7 @@
         else if (character === '"') quoted = false;
         else field += character;
       } else if (character === '"' && field === '') quoted = true;
-      else if (character === ',') { row.push(field); field = ''; }
+      else if (character === delimiter) { row.push(field); field = ''; }
       else if (character === '\n') { row.push(field.replace(/\r$/, '')); rows.push(row); row = []; field = ''; }
       else field += character;
     }
@@ -1339,6 +1346,34 @@
       return rows.map(normalizeBulkObject);
     }
     return parseBulkCsv(text);
+  }
+
+  function parseBulkLegacyText(text) {
+    const blocks = String(text || '').trim().split(/\r?\n\s*\r?\n/).map(block => block.trim()).filter(Boolean);
+    const rows = blocks.map(block => {
+      const raw = {};
+      let recognized = 0;
+      block.split(/\r?\n/).forEach(line => {
+        const match = /^\s*([^:：]+?)\s*[:：]\s*(.*)$/.exec(line);
+        if (!match) return;
+        const key = bulkHeaderKey(match[1]);
+        if (!key) return;
+        raw[key] = match[2];
+        recognized += 1;
+      });
+      return recognized ? normalizeBulkObject(raw) : null;
+    }).filter(Boolean);
+    if (!rows.length) throw new Error('找不到可辨識的案例欄位；請貼上昨天的案例格式，或先從 Excel 複製含標題列的表格。');
+    return rows;
+  }
+
+  function parseBulkPastedText(text) {
+    const source = String(text || '').replace(/^\uFEFF/, '').trim();
+    if (!source) throw new Error('貼上的內容是空白。');
+    if (/^[\[{]/.test(source)) return parseBulkFile(source, 'pasted.json');
+    if (source.includes('\t')) return parseBulkCsv(source, '\t');
+    if (/^[^\r\n:：]+\s*[:：]/m.test(source)) return parseBulkLegacyText(source);
+    return parseBulkCsv(source);
   }
 
   function bulkRowErrors(row, index) {
@@ -1388,22 +1423,57 @@
     const panel = document.createElement('section');
     panel.className = 'panel bulk-viral-import-panel';
     panel.dataset.bulkViralImport = 'true';
-    panel.innerHTML = `<div class="section-head"><div><h2>批次匯入共用案例庫</h2><p>僅管理員可寫入；匯入後所有購買客戶都能在爆款雷達搜尋、拆解與產出文案。</p></div><div class="bulk-template-actions"><button type="button" class="btn" data-bulk-template>下載昨日格式</button><button type="button" class="btn" data-bulk-template-full>下載完整範本</button></div></div><div class="notice">支援 CSV 或 JSON，單次最多 100 筆。你昨天的格式也能直接使用：創作者類型、IG 連結／影片檔、影片長度、觀看／按讚／留言／粉絲數／轉發／分享、想研究的方向。數字可填 985萬 或 1,165萬，系統會轉成可計算數值。</div><div class="bulk-import-picker"><label class="bulk-file-label">選擇 CSV／JSON 檔案<input type="file" data-bulk-import-file accept=".csv,.json,text/csv,application/json" /></label><span class="category-helper">CSV 第一列可使用中文欄位；也支援英文欄位名稱。</span></div><div class="notice" data-bulk-import-status>尚未選擇匯入檔案。</div><div class="bulk-import-preview" data-bulk-import-preview hidden><div class="section-head"><strong data-bulk-preview-count>預覽</strong></div><div class="table-wrap"><table class="table"><thead><tr><th>標題</th><th>創作者</th><th>賽道</th><th>平台</th><th>觀看數</th></tr></thead><tbody></tbody></table></div></div><div class="form-actions"><button type="button" class="btn primary" data-bulk-import-submit disabled>匯入共用案例</button></div>`;
+    panel.innerHTML = `<div class="section-head"><div><h2>批次匯入共用案例庫</h2><p>僅管理員可寫入；匯入後所有購買客戶都能在爆款雷達搜尋、拆解與產出文案。</p></div><div class="bulk-template-actions"><button type="button" class="btn" data-bulk-template>下載昨日格式</button><button type="button" class="btn" data-bulk-template-full>下載完整範本</button></div></div><div class="notice">支援 CSV、JSON、Excel 貼上與昨天的案例文字格式，單次最多 100 筆。數字可填 985萬、1,165萬、20.8萬讚或 1:08，系統會轉成可計算數值。</div><div class="bulk-dropzone" data-bulk-dropzone><div class="bulk-dropzone-copy"><strong>把 CSV／JSON 檔案拖曳到這裡</strong><span>或</span></div><label class="bulk-file-label">選擇檔案<input type="file" data-bulk-import-file accept=".csv,.json,text/csv,application/json" /></label><span class="bulk-file-name" data-bulk-file-name>尚未選擇檔案</span><small>CSV 第一列可使用中文欄位，也支援英文欄位名稱。</small></div><div class="bulk-paste-box"><label for="bulk-paste-content">直接貼上 Excel 表格或昨天的案例文字</label><textarea id="bulk-paste-content" data-bulk-paste rows="7" placeholder="可從 Excel 複製含標題列的儲存格後貼上；也可貼上昨天格式：\n創作者類型：陳芃芃的美食天地\nIG 連結／影片檔：https://...\n影片長度：1:08\n觀看／按讚／留言／粉絲數／轉發／分享：985萬/20.8萬讚/826則/14.1萬位粉絲/\n想研究的方向：美食"></textarea><div class="bulk-paste-actions"><span class="category-helper">Excel 內容會依欄位標題解析；多個案例請用空白行分隔。</span><button type="button" class="btn" data-bulk-paste-parse>解析貼上內容</button></div></div><div class="notice" data-bulk-import-status>尚未選擇檔案或貼上內容。</div><div class="bulk-import-preview" data-bulk-import-preview hidden><div class="section-head"><strong data-bulk-preview-count>預覽</strong></div><div class="table-wrap"><table class="table"><thead><tr><th>標題</th><th>創作者</th><th>賽道</th><th>平台</th><th>觀看數</th></tr></thead><tbody></tbody></table></div></div><div class="form-actions"><button type="button" class="btn primary" data-bulk-import-submit disabled>匯入共用案例</button></div>`;
     content.insertBefore(panel, content.firstChild);
     panel.__bulkRows = [];
     panel.querySelector('[data-bulk-template]').addEventListener('click', () => downloadBulkTemplate(LEGACY_BULK_VIRAL_COLUMNS, '藏書閣寶典-昨日案例格式.csv'));
     panel.querySelector('[data-bulk-template-full]').addEventListener('click', () => downloadBulkTemplate());
-    panel.querySelector('[data-bulk-import-file]').addEventListener('change', async event => {
-      const file = event.target.files?.[0];
+    const fileInput = panel.querySelector('[data-bulk-import-file]');
+    const fileName = panel.querySelector('[data-bulk-file-name]');
+    const dropzone = panel.querySelector('[data-bulk-dropzone]');
+    const status = panel.querySelector('[data-bulk-import-status]');
+    const clearPreview = message => {
+      panel.__bulkRows = [];
+      panel.querySelector('[data-bulk-import-submit]').disabled = true;
+      panel.querySelector('[data-bulk-import-preview]').hidden = true;
+      panel.querySelector('[data-bulk-import-preview] tbody').innerHTML = '';
+      if (message) status.textContent = message;
+    };
+    const handleBulkFile = async file => {
       if (!file) return;
       try {
-        const rows = parseBulkFile(await file.text(), file.name);
-        renderBulkPreview(panel, rows);
+        if (file.size > 2 * 1024 * 1024) throw new Error('檔案太大，請控制在 2 MB 以內。');
+        fileName.textContent = file.name;
+        renderBulkPreview(panel, parseBulkFile(await file.text(), file.name));
       } catch (error) {
-        panel.__bulkRows = [];
-        panel.querySelector('[data-bulk-import-submit]').disabled = true;
-        panel.querySelector('[data-bulk-import-preview]').hidden = true;
-        panel.querySelector('[data-bulk-import-status]').textContent = error.message;
+        fileName.textContent = '讀取失敗';
+        clearPreview(error.message || '檔案無法讀取。');
+      }
+    };
+    fileInput.addEventListener('change', event => handleBulkFile(event.target.files?.[0]));
+    ['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, event => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.classList.add('is-dragover');
+    }));
+    ['dragleave', 'dragend'].forEach(type => dropzone.addEventListener(type, event => {
+      event.preventDefault();
+      dropzone.classList.remove('is-dragover');
+    }));
+    dropzone.addEventListener('drop', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.classList.remove('is-dragover');
+      handleBulkFile(event.dataTransfer?.files?.[0]);
+    });
+    panel.querySelector('[data-bulk-paste-parse]').addEventListener('click', () => {
+      try {
+        const text = panel.querySelector('[data-bulk-paste]').value;
+        fileName.textContent = '貼上內容';
+        renderBulkPreview(panel, parseBulkPastedText(text));
+      } catch (error) {
+        fileName.textContent = '貼上內容解析失敗';
+        clearPreview(error.message || '貼上內容無法解析。');
       }
     });
     panel.querySelector('[data-bulk-import-submit]').addEventListener('click', async event => {
@@ -1415,8 +1485,9 @@
       try {
         const result = await window.cloudStore.adminViralBatch(rows);
         panel.querySelector('[data-bulk-import-status]').textContent = `已匯入 ${result.imported || rows.length} 筆共用案例；所有客戶可在爆款雷達使用。`;
-        event.target.form?.reset?.();
-        panel.querySelector('[data-bulk-import-file]').value = '';
+        fileInput.value = '';
+        panel.querySelector('[data-bulk-paste]').value = '';
+        fileName.textContent = '尚未選擇檔案';
         panel.__bulkRows = [];
         panel.querySelector('[data-bulk-import-preview]').hidden = true;
         await window.cloudStore.refreshCloudState?.();
@@ -1630,7 +1701,7 @@
   </style>`);
 
   document.head.insertAdjacentHTML('beforeend', `<style id="instagram-source-modes-style">
-    .instagram-source-modes-panel{margin:0 0 18px}.instagram-mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0 13px;border-bottom:1px solid var(--line);padding-bottom:10px}.instagram-mode-tab{border:1px solid var(--line);border-radius:999px;background:#fffdfa;color:var(--medium);padding:9px 15px;font-size:12px;font-weight:700;cursor:pointer}.instagram-mode-tab:hover,.instagram-mode-tab.active{border-color:var(--pink);background:var(--light-pink);color:var(--dark)}.instagram-mode-actions{display:flex;gap:9px;flex-wrap:wrap;margin:13px 0}.instagram-source-modes-panel [data-instagram-connection-status],.instagram-source-modes-panel [data-manual-import-status]{margin:10px 0}.bulk-viral-import-panel{margin:0 0 18px}.bulk-template-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.bulk-import-picker{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:15px 0 10px}.bulk-file-label{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:999px;padding:10px 15px;background:#fffdfa;font-weight:700;cursor:pointer}.bulk-file-label input{max-width:210px;font-weight:400}.bulk-import-preview{margin-top:12px}.bulk-import-preview .table-wrap{max-height:285px;overflow:auto}.manual-import-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.manual-import-form .form-field{margin:0}.manual-import-form .form-field.full{grid-column:1/-1}.manual-import-form textarea{min-height:84px}.instagram-source-modes-panel [hidden],.bulk-viral-import-panel [hidden]{display:none!important}@media(max-width:760px){.manual-import-form{grid-template-columns:1fr}.manual-import-form .form-field.full{grid-column:auto}.instagram-mode-actions{align-items:stretch;flex-direction:column}.instagram-mode-actions .btn{width:100%}.bulk-template-actions{width:100%;justify-content:flex-start}.bulk-file-label{width:100%;border-radius:14px;flex-direction:column;align-items:flex-start}.bulk-file-label input{max-width:100%;width:100%}}
+    .instagram-source-modes-panel{margin:0 0 18px}.instagram-mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0 13px;border-bottom:1px solid var(--line);padding-bottom:10px}.instagram-mode-tab{border:1px solid var(--line);border-radius:999px;background:#fffdfa;color:var(--medium);padding:9px 15px;font-size:12px;font-weight:700;cursor:pointer}.instagram-mode-tab:hover,.instagram-mode-tab.active{border-color:var(--pink);background:var(--light-pink);color:var(--dark)}.instagram-mode-actions{display:flex;gap:9px;flex-wrap:wrap;margin:13px 0}.instagram-source-modes-panel [data-instagram-connection-status],.instagram-source-modes-panel [data-manual-import-status]{margin:10px 0}.bulk-viral-import-panel{margin:0 0 18px}.bulk-template-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.bulk-dropzone{display:grid;grid-template-columns:auto auto 1fr;align-items:center;gap:10px;margin:15px 0 10px;padding:14px 16px;border:1px dashed var(--soft-blue);border-radius:16px;background:#fbfcfc;transition:border-color .16s,background .16s,box-shadow .16s}.bulk-dropzone.is-dragover{border-color:var(--pink);background:var(--light-pink);box-shadow:0 0 0 3px rgba(201,147,138,.12)}.bulk-dropzone-copy{display:flex;align-items:center;gap:9px;white-space:nowrap}.bulk-dropzone-copy strong{font-size:12px}.bulk-dropzone-copy span{color:var(--gray);font-size:11px}.bulk-file-label{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:999px;padding:10px 15px;background:#fffdfa;font-weight:700;cursor:pointer;white-space:nowrap}.bulk-file-label input{max-width:210px;font-weight:400}.bulk-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--medium);font-size:11px}.bulk-dropzone>small{grid-column:1/-1;color:var(--gray);font-size:10px}.bulk-paste-box{display:grid;gap:8px;margin:13px 0}.bulk-paste-box>label{font-size:12px;color:var(--medium);font-weight:800}.bulk-paste-box textarea{width:100%;min-height:140px;border:1px solid var(--line);border-radius:14px;padding:12px;background:#fff;resize:vertical;color:var(--dark);font-size:12px;line-height:1.6}.bulk-paste-box textarea:focus{border-color:var(--pink);outline:0;box-shadow:0 0 0 3px rgba(201,147,138,.12)}.bulk-paste-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.bulk-import-preview{margin-top:12px}.bulk-import-preview .table-wrap{max-height:285px;overflow:auto}.manual-import-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.manual-import-form .form-field{margin:0}.manual-import-form .form-field.full{grid-column:1/-1}.manual-import-form textarea{min-height:84px}.instagram-source-modes-panel [hidden],.bulk-viral-import-panel [hidden]{display:none!important}@media(max-width:760px){.manual-import-form{grid-template-columns:1fr}.manual-import-form .form-field.full{grid-column:auto}.instagram-mode-actions{align-items:stretch;flex-direction:column}.instagram-mode-actions .btn{width:100%}.bulk-template-actions{width:100%;justify-content:flex-start}.bulk-dropzone{grid-template-columns:1fr;padding:14px}.bulk-dropzone-copy{white-space:normal;flex-wrap:wrap}.bulk-file-label{width:100%;border-radius:14px;justify-content:center}.bulk-file-label input{max-width:100%;width:100%}.bulk-file-name{max-width:100%}.bulk-paste-actions{align-items:stretch;flex-direction:column}.bulk-paste-actions .btn{width:100%}}
   </style>`);
 
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。
