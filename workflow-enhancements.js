@@ -1155,7 +1155,10 @@
     const status = source.last_sync_status || 'PENDING';
     const label = status === 'SUCCESS' ? '已同步' : status === 'ERROR' ? '同步失敗' : '等待同步';
     const className = status === 'SUCCESS' ? 'sage' : status === 'ERROR' ? 'pink' : 'blue';
-    return `<span class="tag ${className}">${label}</span><small>${escapeHtml(formatInstagramSyncTime(source.last_synced_at))}</small>`;
+    const error = status === 'ERROR' && source.last_sync_error
+      ? `<small class="instagram-source-error">${escapeHtml(source.last_sync_error)}</small>`
+      : '';
+    return `<span class="tag ${className}">${label}</span><small>${escapeHtml(formatInstagramSyncTime(source.last_synced_at))}</small>${error}`;
   }
 
   function renderInstagramSources(panel, sources) {
@@ -1556,7 +1559,11 @@
       try {
         const result = await window.cloudStore.instagramSync();
         const truncated = result.truncatedSources?.length ? `；${result.truncatedSources.join('、')} 已達本次分頁上限，仍可能有更早內容未讀取` : '';
-        panel.querySelector('[data-instagram-sync-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個來源失敗；請查看各帳號狀態。${truncated}` : `同步完成，新增或更新 ${result.imported || 0} 筆 Reels。${truncated}`;
+        const errorDetails = result.errors?.length
+          ? ` ${result.errors.map(item => `@${item.username}：${item.message}`).join('；')}`
+          : '';
+        panel.querySelector('[data-instagram-sync-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個來源失敗。${errorDetails}${truncated}` : `同步完成，新增或更新 ${result.imported || 0} 筆 Reels。${truncated}`;
+        await loadInstagramSources(panel);
         await window.cloudStore.refreshCloudState?.();
       } catch (error) {
         panel.querySelector('[data-instagram-sync-status]').textContent = error.message;
@@ -1698,7 +1705,7 @@
   </style>`);
 
   document.head.insertAdjacentHTML('beforeend', `<style id="instagram-sync-style">
-    .instagram-sync-panel{margin:0 0 18px}.instagram-source-form{display:grid;grid-template-columns:1.1fr 1.1fr .8fr auto;gap:10px;align-items:end;margin:14px 0}.instagram-source-form .form-field{margin:0}.instagram-source-list{display:grid;gap:7px}.instagram-source-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fffdfa}.instagram-source-row>div:first-child{display:grid;gap:2px;min-width:0}.instagram-source-row strong{font-size:12px}.instagram-source-row small{color:var(--gray);font-size:10px}.instagram-source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.instagram-source-meta small{white-space:nowrap}.instagram-sync-panel [data-instagram-sync-status]{margin:0}.instagram-sync-panel .section-head{margin-top:0}@media(max-width:760px){.instagram-source-form{grid-template-columns:1fr 1fr}.instagram-source-form .form-actions{grid-column:1/-1}.instagram-source-row{align-items:flex-start;flex-direction:column}.instagram-source-meta{justify-content:flex-start}}
+    .instagram-sync-panel{margin:0 0 18px}.instagram-source-form{display:grid;grid-template-columns:1.1fr 1.1fr .8fr auto;gap:10px;align-items:end;margin:14px 0}.instagram-source-form .form-field{margin:0}.instagram-source-list{display:grid;gap:7px}.instagram-source-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fffdfa}.instagram-source-row>div:first-child{display:grid;gap:2px;min-width:0}.instagram-source-row strong{font-size:12px}.instagram-source-row small{color:var(--gray);font-size:10px}.instagram-source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.instagram-source-meta small{white-space:nowrap}.instagram-source-meta .instagram-source-error{flex-basis:100%;max-width:620px;color:#a45f56;white-space:normal;overflow-wrap:anywhere}.instagram-sync-panel [data-instagram-sync-status]{margin:0}.instagram-sync-panel .section-head{margin-top:0}@media(max-width:760px){.instagram-source-form{grid-template-columns:1fr 1fr}.instagram-source-form .form-actions{grid-column:1/-1}.instagram-source-row{align-items:flex-start;flex-direction:column}.instagram-source-meta{justify-content:flex-start}.instagram-source-meta .instagram-source-error{max-width:100%}}
   </style>`);
 
   document.head.insertAdjacentHTML('beforeend', `<style id="instagram-source-modes-style">

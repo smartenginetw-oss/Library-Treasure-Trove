@@ -54,13 +54,37 @@ async function fetchJson(url) {
     const response = await fetch(url, { signal: controller.signal });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.error) {
-      const message = payload.error?.message || `Instagram API 回應 ${response.status}`;
-      throw Object.assign(new Error(message), { code: 'INSTAGRAM_API_ERROR', status: 502 });
+      const apiError = payload.error || {};
+      const message = apiError.message || `Instagram API 回應 ${response.status}`;
+      throw Object.assign(new Error(message), {
+        code: 'INSTAGRAM_API_ERROR',
+        status: 502,
+        metaCode: apiError.code,
+        metaSubcode: apiError.error_subcode,
+        metaType: apiError.type
+      });
     }
     return payload;
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Business Discovery 在不同 Graph API 版本／權限組合下，支援的媒體欄位可能不同。
+// 由完整欄位逐級降級，避免一個非必要欄位讓整個來源都無法同步；權杖或帳號權限錯誤不會被隱藏。
+const MEDIA_FIELD_SETS = [
+  ['id', 'caption', 'media_type', 'media_product_type', 'permalink', 'timestamp', 'like_count', 'comments_count', 'view_count', 'thumbnail_url'],
+  ['id', 'caption', 'media_type', 'media_product_type', 'permalink', 'timestamp', 'like_count', 'comments_count'],
+  ['id', 'caption', 'media_type', 'permalink', 'timestamp', 'like_count', 'comments_count']
+];
+
+function isFieldCompatibilityError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.metaCode === 100 || /field|unsupported|does not exist|invalid.*field|非必要欄位|欄位/.test(message);
+}
+
+function creatorFields(handle, mediaFields, pageSize) {
+  return `business_discovery.username(${handle}){id,username,name,followers_count,media.limit(${pageSize}){${mediaFields.join(',')}}}`;
 }
 
 function nextPageUrl(value, accessToken) {
@@ -106,17 +130,27 @@ export async function collectMediaPages(firstPage, { fetchPage = fetchJson, acce
   return { media, pages, truncated };
 }
 
-async function fetchCreator(source, options) {
+export async function fetchCreator(source, options) {
   const handle = username(source.username);
   if (!handle) throw Object.assign(new Error(`監測帳號格式無效：${source.username || '空白'}`), { code: 'INSTAGRAM_USERNAME_INVALID', status: 422 });
-  const fields = `business_discovery.username(${handle}){id,username,name,followers_count,media.limit(${options.mediaPageSize}){id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,view_count,thumbnail_url}}`;
-  const params = new URLSearchParams({ fields, access_token: options.accessToken });
-  const endpoint = `${options.graphHost}/${options.apiVersion}/${encodeURIComponent(options.businessAccountId)}?${params}`;
-  const payload = await fetchJson(endpoint);
-  const account = payload.business_discovery;
+  let payload;
+  let fieldSetIndex = 0;
+  for (const [index, mediaFields] of MEDIA_FIELD_SETS.entries()) {
+    const fields = creatorFields(handle, mediaFields, options.mediaPageSize);
+    const params = new URLSearchParams({ fields, access_token: options.accessToken });
+    const endpoint = `${options.graphHost}/${options.apiVersion}/${encodeURIComponent(options.businessAccountId)}?${params}`;
+    try {
+      payload = await fetchJson(endpoint);
+      fieldSetIndex = index;
+      break;
+    } catch (error) {
+      if (index === MEDIA_FIELD_SETS.length - 1 || !isFieldCompatibilityError(error)) throw error;
+    }
+  }
+  const account = payload?.business_discovery;
   if (!account) throw Object.assign(new Error(`找不到 Instagram 專業帳號：@${handle}`), { code: 'INSTAGRAM_CREATOR_NOT_FOUND', status: 404 });
   const pages = await collectMediaPages(account.media, { accessToken: options.accessToken, maxPages: options.maxMediaPages });
-  return { handle, account, media: pages.media, mediaPages: pages.pages, mediaTruncated: pages.truncated };
+  return { handle, account, media: pages.media, mediaPages: pages.pages, mediaTruncated: pages.truncated, fieldSetIndex };
 }
 
 function buildRow(source, creator, media, existing, syncedAt) {
@@ -199,6 +233,7 @@ export async function syncInstagramCreators({ trigger = 'cron' } = {}) {
       if (creator.mediaTruncated) truncatedSources.push(source.username);
     } catch (error) {
       const message = String(error.message || '未知錯誤').slice(0, 500);
+      console.error('Instagram creator sync failed', JSON.stringify({ username: source.username, code: error.code || 'INSTAGRAM_SYNC_ERROR', metaCode: error.metaCode || null, metaSubcode: error.metaSubcode || null, message }));
       errors.push({ username: source.username, code: error.code || 'INSTAGRAM_SYNC_ERROR', message });
       await updateSource(client, source, { last_synced_at: syncedAt, last_sync_status: 'ERROR', last_sync_error: message });
     }
