@@ -504,6 +504,13 @@
     return payload;
   }
 
+  async function getHealth() {
+    const response = await fetch(`${apiBase}/api/health`, { cache: 'no-store' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || '伺服器狀態讀取失敗');
+    return payload;
+  }
+
   async function refreshCloudState() {
     if (!client || !session?.access_token || !app) return null;
     const remote = await pullState();
@@ -522,6 +529,7 @@
     listInstagramSources,
     saveInstagramSource,
     instagramSync,
+    getHealth,
     refreshCloudState,
     queueSync,
     async attachApp(api) {

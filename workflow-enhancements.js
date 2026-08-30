@@ -1188,6 +1188,20 @@
     }
   }
 
+  async function refreshInstagramConfigNotice(panel) {
+    const notice = panel.querySelector('[data-instagram-sync-status]');
+    if (!notice || typeof window.cloudStore?.getHealth !== 'function') return;
+    try {
+      const health = await window.cloudStore.getHealth();
+      const configured = health.configured || {};
+      notice.textContent = configured.instagram && configured.cron
+        ? 'Instagram API 與每日排程已就緒；不需要創作者密碼，只會在伺服器端使用 token。'
+        : '需要先在部署平台設定 Instagram API 與 Cron 憑證；不需要創作者密碼，只會在伺服器端使用 token。';
+    } catch {
+      notice.textContent = '正在檢查 Instagram API 設定；不需要創作者密碼，只會在伺服器端使用 token。';
+    }
+  }
+
   function addInstagramSyncPanel() {
     if (route() !== 'admin/viral-content') return;
     const content = document.getElementById('appContent');
@@ -1228,6 +1242,7 @@
       }
     });
     loadInstagramSources(panel);
+    refreshInstagramConfigNotice(panel);
   }
 
   function enhancedRender() {
