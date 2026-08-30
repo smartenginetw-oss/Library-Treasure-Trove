@@ -117,6 +117,9 @@
       commentsSample: row.comments_sample,
       sourceUrl: row.source_url,
       archived: row.archived,
+      // The cloud schema stores created_at rather than the local-only
+      // publishDate field. Keep the radar table renderable after hydration.
+      publishDate: row.publish_date || row.published_at || row.created_at,
       createdAt: row.created_at
     };
   }

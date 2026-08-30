@@ -111,4 +111,13 @@ function enhanceSelects(){document.querySelectorAll('select:not([multiple]):not(
 setTimeout(localizeUi,0);setTimeout(localizeUiExtra,0);setTimeout(localizeContract,0);setTimeout(enhanceSelects,0);setTimeout(enhanceCategoryPicker,0);window.addEventListener('hashchange',()=>{setTimeout(localizeUi,0);setTimeout(localizeUiExtra,0);setTimeout(localizeContract,0);setTimeout(enhanceSelects,0);setTimeout(enhanceCategoryPicker,0)});
 window.__bookVault={getState:()=>state,mergeCloudState:remote=>{if(!remote)return;state={...state,profile:remote.profile?{...state.profile,...remote.profile}:state.profile,topics:Array.isArray(remote.topics)?remote.topics:state.topics,formulas:Array.isArray(remote.formulas)?remote.formulas:state.formulas,savedViralIds:Array.isArray(remote.savedViralIds)?remote.savedViralIds:state.savedViralIds,virals:remote.virals?.length?remote.virals:state.virals};state.savedViralIds??=[];save();render()},save};window.cloudStore?.attachApp?.(window.__bookVault);
 </script><script src="workflow-enhancements.js"></script>
+<script>
+// Cloud rows may not include a local publishDate. Avoid aborting the radar
+// render when a date is missing or malformed.
+window.date = function safeDate(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '—' : new Intl.DateTimeFormat('zh-TW', { month: 'numeric', day: 'numeric' }).format(parsed);
+};
+if (typeof render === 'function' && route() === 'radar') render();
+</script>
 </body></html>
