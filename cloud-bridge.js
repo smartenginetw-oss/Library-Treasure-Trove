@@ -151,6 +151,11 @@
       summary: row.summary,
       commentsSample: row.comments_sample,
       sourceUrl: row.source_url,
+      instagramMediaId: row.instagram_media_id,
+      instagramSourceId: row.instagram_source_id,
+      publishedAt: row.published_at,
+      lastSyncedAt: row.last_synced_at,
+      syncSource: row.sync_source,
       archived: row.archived,
       // The cloud schema stores created_at rather than the local-only
       // publishDate field. Keep the radar table renderable after hydration.
@@ -466,6 +471,46 @@
     return payload.viral;
   }
 
+  async function listInstagramSources() {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能管理 Instagram 監測來源');
+    const response = await fetch(`${apiBase}/api/instagram-sources`, {
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Instagram 監測來源讀取失敗');
+    return payload.sources || [];
+  }
+
+  async function saveInstagramSource(input) {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能管理 Instagram 監測來源');
+    const response = await fetch(`${apiBase}/api/instagram-sources`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify(input)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Instagram 監測來源儲存失敗');
+    return payload.source;
+  }
+
+  async function instagramSync() {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能執行 Instagram 同步');
+    const response = await fetch(`${apiBase}/api/instagram-sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok && response.status !== 207) throw new Error(payload.message || 'Instagram 同步失敗');
+    return payload;
+  }
+
+  async function refreshCloudState() {
+    if (!client || !session?.access_token || !app) return null;
+    const remote = await pullState();
+    if (remote) app.mergeCloudState(remote);
+    return remote;
+  }
+
   window.cloudStore = {
     isConfigured: () => hasConfig,
     isSignedIn: () => Boolean(session?.user),
@@ -474,6 +519,10 @@
     generateTopic,
     generateDeliverable,
     adminViral,
+    listInstagramSources,
+    saveInstagramSource,
+    instagramSync,
+    refreshCloudState,
     queueSync,
     async attachApp(api) {
       app = api;

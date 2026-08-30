@@ -15,6 +15,19 @@ export function createUserClient(accessToken) {
   });
 }
 
+export function createServiceClient() {
+  const url = required('SUPABASE_URL');
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw Object.assign(new Error('缺少伺服器環境設定：SUPABASE_SERVICE_ROLE_KEY'), { code: 'SUPABASE_NOT_CONFIGURED', status: 503 });
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+  });
+}
+
+export function isAdminUser(user) {
+  return user?.app_metadata?.role === 'admin';
+}
+
 export async function authenticateRequest(req) {
   const token = req.headers?.authorization?.replace(/^Bearer\s+/i, '').trim();
   if (!token) {
@@ -37,6 +50,8 @@ export async function authenticateRequest(req) {
 export function envStatus() {
   return {
     supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY),
-    openai: Boolean(process.env.OPENAI_API_KEY)
+    openai: Boolean(process.env.OPENAI_API_KEY),
+    instagram: Boolean(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID),
+    cron: Boolean(process.env.CRON_SECRET)
   };
 }
