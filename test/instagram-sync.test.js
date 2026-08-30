@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collectMediaPages, fetchCreator, instagramMediaIsReel } from '../api/_lib/instagram-sync.js';
+import { collectMediaPages, fetchCreator, instagramMediaIsReel, instagramSyncErrorMessage } from '../api/_lib/instagram-sync.js';
 
 test('Instagram media classifier keeps reels and excludes ordinary media', () => {
   assert.equal(instagramMediaIsReel({ media_type: 'VIDEO', media_product_type: 'REELS' }), true);
@@ -55,4 +55,10 @@ test('Instagram creator fetch retries with supported fields when an optional fie
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('Instagram token expiry is reported with an actionable Chinese message', () => {
+  const message = instagramSyncErrorMessage({ metaCode: 190, message: 'Error validating access token: Session has expired.' });
+  assert.match(message, /存取權杖已過期/);
+  assert.match(message, /INSTAGRAM_ACCESS_TOKEN/);
 });

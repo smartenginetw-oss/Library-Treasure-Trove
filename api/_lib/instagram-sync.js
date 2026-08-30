@@ -87,6 +87,21 @@ function creatorFields(handle, mediaFields, pageSize) {
   return `business_discovery.username(${handle}){id,username,name,followers_count,media.limit(${pageSize}){${mediaFields.join(',')}}}`;
 }
 
+export function instagramSyncErrorMessage(error) {
+  const raw = String(error?.message || '未知錯誤');
+  const code = Number(error?.metaCode);
+  if (code === 190 || /access token|session has expired|oauthexception/i.test(raw)) {
+    return 'Instagram 存取權杖已過期或無效（Meta 錯誤 190）。請重新產生可查詢 Instagram 專業帳號的長效權杖，更新 Vercel Production 的 INSTAGRAM_ACCESS_TOKEN，並重新部署。';
+  }
+  if (code === 10 || /permission|permissions|許可/i.test(raw)) {
+    return 'Meta 權限不足。請確認 App 已取得 instagram_basic、pages_show_list、pages_read_engagement，且權杖所屬專業帳號已連結 Facebook 粉絲專頁。';
+  }
+  if (code === 100 || /unsupported|does not exist|invalid.*field/i.test(raw)) {
+    return `Meta 無法使用目前的帳號或欄位（錯誤 100）；系統已自動嘗試相容欄位。請確認 INSTAGRAM_BUSINESS_ACCOUNT_ID 是 Instagram 專業帳號 ID。`;
+  }
+  return raw;
+}
+
 function nextPageUrl(value, accessToken) {
   if (!value) return '';
   try {
@@ -232,8 +247,9 @@ export async function syncInstagramCreators({ trigger = 'cron' } = {}) {
       await updateSource(client, source, { remote_user_id: String(creator.account.id || ''), last_synced_at: syncedAt, last_sync_status: 'SUCCESS', last_sync_error: syncNote });
       if (creator.mediaTruncated) truncatedSources.push(source.username);
     } catch (error) {
-      const message = String(error.message || '未知錯誤').slice(0, 500);
-      console.error('Instagram creator sync failed', JSON.stringify({ username: source.username, code: error.code || 'INSTAGRAM_SYNC_ERROR', metaCode: error.metaCode || null, metaSubcode: error.metaSubcode || null, message }));
+      const rawMessage = String(error.message || '未知錯誤');
+      const message = instagramSyncErrorMessage(error).slice(0, 500);
+      console.error('Instagram creator sync failed', JSON.stringify({ username: source.username, code: error.code || 'INSTAGRAM_SYNC_ERROR', metaCode: error.metaCode || null, metaSubcode: error.metaSubcode || null, message, rawMessage }));
       errors.push({ username: source.username, code: error.code || 'INSTAGRAM_SYNC_ERROR', message });
       await updateSource(client, source, { last_synced_at: syncedAt, last_sync_status: 'ERROR', last_sync_error: message });
     }
