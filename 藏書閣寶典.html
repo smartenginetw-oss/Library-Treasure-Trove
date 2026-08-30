@@ -190,8 +190,9 @@ function localizeChineseUi() {
     });
   });
 }
-if (typeof render === 'function') {
-  render();
+const renderApp = window.render || render;
+if (typeof renderApp === 'function') {
+  renderApp();
   setTimeout(localizeChineseUi, 0);
   setTimeout(localizeChineseUi, 50);
 }
