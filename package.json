@@ -5,7 +5,7 @@
   "type": "module",
   "description": "藏書閣寶典：跨賽道創作者內容策略 SaaS",
   "scripts": {
-    "check": "node --check workflow-enhancements.js && node --check api/health.js && node --check api/generate-topic.js && node --check api/sync-state.js && node --check api/admin-viral.js && node --check api/_lib/http.js && node --check api/_lib/cta.js && node --check api/_lib/deliverable.js && node --check api/_lib/supabase.js && node --check cloud-bridge.js",
+    "check": "node --check workflow-enhancements.js && node --check api/health.js && node --check api/generate-topic.js && node --check api/generate-deliverable.js && node --check api/sync-state.js && node --check api/admin-viral.js && node --check api/_lib/http.js && node --check api/_lib/cta.js && node --check api/_lib/deliverable.js && node --check api/_lib/generate-deliverable.js && node --check api/_lib/supabase.js && node --check cloud-bridge.js",
     "test": "node --test \"test/*.test.js\"",
     "test:e2e": "node scripts/e2e-cloud.mjs"
   },

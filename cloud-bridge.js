@@ -385,6 +385,18 @@
     return payload.topic;
   }
 
+  async function generateDeliverable(input) {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能使用伺服器端智慧文案服務');
+    const response = await fetch(`${apiBase}/api/generate-deliverable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify(input)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || '智慧文案服務暫時無法回應');
+    return payload.deliverable;
+  }
+
   async function adminViral(input) {
     if (!client || !session?.access_token) throw new Error('請先登入雲端，才能管理雲端案例');
     const response = await fetch(`${apiBase}/api/admin-viral`, {
@@ -403,6 +415,7 @@
     currentUser: () => session?.user || null,
     showAuthModal,
     generateTopic,
+    generateDeliverable,
     adminViral,
     queueSync,
     async attachApp(api) {
