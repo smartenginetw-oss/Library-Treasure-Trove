@@ -1142,7 +1142,7 @@
     if (!content || content.querySelector('[data-workflow-summary]')) return;
     content.insertAdjacentHTML('beforeend', `<section class="panel workflow-summary" data-workflow-summary><div class="section-head"><div><h2>手冊工作流進度</h2><p>把定位、題庫、交付與復盤串成下一個可執行動作。</p></div><span class="tag ${completion.complete ? 'sage' : 'pink'}">定位 ${completion.done}/${completion.total}</span></div><div class="workflow-summary-grid"><button type="button" onclick="navigate('positioning')"><strong>定位資料卡</strong><small>補齊三支柱與素材邊界</small></button><button type="button" onclick="navigate('topic-scoring')"><strong>題目評分</strong><small>五項條件排出製作順序</small></button><button type="button" onclick="navigate('workflow')"><strong>內容交付包</strong><small>母內容、輪播、四平台、分鏡</small></button><button type="button" onclick="navigate('reviews')"><strong>復盤實驗</strong><small>${dueCount ? `有 ${dueCount} 筆待處理` : '發布後 48–72 小時回來記錄'}</small></button></div></section>`);
   };
-  admin = function () { legacyAdmin(); addInstagramSourceModesPanel(); addInstagramSyncPanel(); };
+  admin = function () { legacyAdmin(); addInstagramSourceModesPanel(); addInstagramSyncPanel(); addBulkViralImportPanel(); };
   enhanceTopicDraft();
 
   function formatInstagramSyncTime(value) {
@@ -1200,6 +1200,198 @@
     } catch {
       notice.textContent = '正在檢查 Instagram API 設定；不需要創作者密碼，只會在伺服器端使用 token。';
     }
+  }
+
+  const BULK_VIRAL_COLUMNS = [
+    { key: 'id', label: '案例編號' },
+    { key: 'title', label: '標題' },
+    { key: 'creatorName', label: '創作者名稱' },
+    { key: 'creatorHandle', label: '創作者帳號' },
+    { key: 'platform', label: '平台' },
+    { key: 'niche', label: '賽道' },
+    { key: 'sourceUrl', label: '內容網址' },
+    { key: 'durationSeconds', label: '影片秒數' },
+    { key: 'followers', label: '粉絲數' },
+    { key: 'views', label: '觀看數' },
+    { key: 'likes', label: '按讚數' },
+    { key: 'comments', label: '留言數' },
+    { key: 'reposts', label: '轉發數' },
+    { key: 'shares', label: '分享數' },
+    { key: 'velocity', label: '速度分' },
+    { key: 'freshness', label: '新鮮度分' },
+    { key: 'repeatedFormat', label: '重複格式成功度' },
+    { key: 'trafficCodes', label: '流量密碼' },
+    { key: 'hookType', label: 'Hook 類型' },
+    { key: 'coverType', label: '封面類型' },
+    { key: 'format', label: '內容格式' },
+    { key: 'summary', label: '摘要與拆解備註' },
+    { key: 'commentsSample', label: '留言樣本' }
+  ];
+
+  const BULK_VIRAL_HEADER_ALIASES = new Map(BULK_VIRAL_COLUMNS.flatMap(column => [
+    [column.key, column.key],
+    [column.key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`), column.key],
+    [column.label, column.key]
+  ].map(([key, value]) => [String(key).replace(/[\s_\/（）()]/g, '').toLowerCase(), value])));
+  const BULK_NUMBER_FIELDS = new Set(['durationSeconds', 'followers', 'views', 'likes', 'comments', 'reposts', 'shares', 'velocity', 'freshness', 'repeatedFormat']);
+
+  function bulkHeaderKey(value) {
+    const normalized = String(value || '').replace(/^\uFEFF/, '').replace(/[\s_\/（）()]/g, '').toLowerCase();
+    return BULK_VIRAL_HEADER_ALIASES.get(normalized) || '';
+  }
+
+  function bulkRowValue(key, value) {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    if (key === 'trafficCodes') return text.split(/[,、|]/).map(item => item.trim()).filter(Boolean);
+    if (BULK_NUMBER_FIELDS.has(key)) {
+      const time = /^(\d{1,3}):(\d{1,2})$/.exec(text);
+      if (key === 'durationSeconds' && time) return Number(time[1]) * 60 + Number(time[2]);
+      const unit = /^([\d.]+)\s*(億|萬|千|B|M|K)$/i.exec(text.replace(/,/g, ''));
+      if (unit) {
+        const multiplier = { '億': 100000000, '萬': 10000, '千': 1000, B: 1000000000, M: 1000000, K: 1000 }[unit[2].toUpperCase()] || 1;
+        return String(Number(unit[1]) * multiplier);
+      }
+      return text.replace(/,/g, '').replace(/秒$/i, '');
+    }
+    return text;
+  }
+
+  function normalizeBulkObject(input) {
+    const output = {};
+    Object.entries(input || {}).forEach(([rawKey, value]) => {
+      const key = bulkHeaderKey(rawKey);
+      if (!key) return;
+      output[key] = key === 'trafficCodes' && Array.isArray(value)
+        ? value.map(item => String(item || '').trim()).filter(Boolean)
+        : bulkRowValue(key, value);
+    });
+    return output;
+  }
+
+  function parseBulkCsv(text) {
+    const rows = [];
+    let row = [];
+    let field = '';
+    let quoted = false;
+    const source = String(text || '').replace(/^\uFEFF/, '');
+    for (let index = 0; index < source.length; index += 1) {
+      const character = source[index];
+      if (quoted) {
+        if (character === '"' && source[index + 1] === '"') { field += '"'; index += 1; }
+        else if (character === '"') quoted = false;
+        else field += character;
+      } else if (character === '"' && field === '') quoted = true;
+      else if (character === ',') { row.push(field); field = ''; }
+      else if (character === '\n') { row.push(field.replace(/\r$/, '')); rows.push(row); row = []; field = ''; }
+      else field += character;
+    }
+    if (field || row.length) { row.push(field.replace(/\r$/, '')); rows.push(row); }
+    const headerRow = rows.shift() || [];
+    const headers = headerRow.map(bulkHeaderKey);
+    if (!headers.some(Boolean)) throw new Error('找不到可辨識的欄位；請使用下載的 CSV 範本。');
+    return rows.filter(cells => cells.some(cell => String(cell || '').trim())).map(cells => {
+      const result = {};
+      headers.forEach((key, index) => { if (key) result[key] = bulkRowValue(key, cells[index]); });
+      return result;
+    });
+  }
+
+  function parseBulkFile(text, fileName) {
+    if (/\.json$/i.test(fileName)) {
+      let payload;
+      try { payload = JSON.parse(String(text || '').replace(/^\uFEFF/, '')); }
+      catch { throw new Error('JSON 格式無法讀取，請確認括號與逗號。'); }
+      const rows = Array.isArray(payload) ? payload : payload?.rows;
+      if (!Array.isArray(rows)) throw new Error('JSON 必須是案例陣列，或包含 rows 陣列。');
+      return rows.map(normalizeBulkObject);
+    }
+    return parseBulkCsv(text);
+  }
+
+  function bulkRowErrors(row, index) {
+    const errors = [];
+    if (!String(row.title || '').trim()) errors.push('標題不可空白');
+    if (!String(row.creatorName || '').trim()) errors.push('創作者名稱不可空白');
+    if (!(Number(row.followers) > 0)) errors.push('粉絲數需大於 0');
+    if (!(Number(row.views) > 0)) errors.push('觀看數需大於 0');
+    return errors.length ? `第 ${index + 1} 列：${errors.join('、')}` : '';
+  }
+
+  function csvCell(value) {
+    const text = Array.isArray(value) ? value.join('、') : String(value ?? '');
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function downloadBulkTemplate() {
+    const csv = `\uFEFF${BULK_VIRAL_COLUMNS.map(column => csvCell(column.label)).join(',')}\r\n`;
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = '藏書閣寶典-共用案例匯入範本.csv';
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function renderBulkPreview(panel, rows) {
+    const status = panel.querySelector('[data-bulk-import-status]');
+    const preview = panel.querySelector('[data-bulk-import-preview]');
+    const submit = panel.querySelector('[data-bulk-import-submit]');
+    const errors = rows.map(bulkRowErrors).filter(Boolean);
+    panel.__bulkRows = errors.length ? [] : rows;
+    submit.disabled = !rows.length || errors.length > 0;
+    status.textContent = errors.length
+      ? `讀取 ${rows.length} 筆，但有 ${errors.length} 筆需要修正：${errors.slice(0, 3).join('；')}${errors.length > 3 ? '；…' : ''}`
+      : rows.length ? `已讀取 ${rows.length} 筆，按「匯入共用案例」後會一次寫入所有客戶可讀取的案例庫。` : '檔案沒有可匯入的案例。';
+    preview.hidden = !rows.length;
+    preview.querySelector('tbody').innerHTML = rows.slice(0, 8).map(row => `<tr><td>${escapeHtml(row.title || '—')}</td><td>${escapeHtml(row.creatorName || '—')}</td><td>${escapeHtml(row.niche || '—')}</td><td>${escapeHtml(row.platform || 'Instagram')}</td><td>${escapeHtml(row.views || '—')}</td></tr>`).join('');
+    const count = preview.querySelector('[data-bulk-preview-count]');
+    if (count) count.textContent = rows.length > 8 ? `顯示前 8 筆，共 ${rows.length} 筆` : `共 ${rows.length} 筆`;
+  }
+
+  function addBulkViralImportPanel() {
+    if (route() !== 'admin/viral-content') return;
+    const content = document.getElementById('appContent');
+    if (!content || content.querySelector('[data-bulk-viral-import]')) return;
+    const panel = document.createElement('section');
+    panel.className = 'panel bulk-viral-import-panel';
+    panel.dataset.bulkViralImport = 'true';
+    panel.innerHTML = `<div class="section-head"><div><h2>批次匯入共用案例庫</h2><p>僅管理員可寫入；匯入後所有購買客戶都能在爆款雷達搜尋、拆解與產出文案。</p></div><button type="button" class="btn" data-bulk-template>下載 CSV 範本</button></div><div class="notice">支援 CSV 或 JSON，單次最多 100 筆。必填：標題、創作者名稱、粉絲數、觀看數。數字請填實際可驗證資料，不要用估算值。</div><div class="bulk-import-picker"><label class="bulk-file-label">選擇 CSV／JSON 檔案<input type="file" data-bulk-import-file accept=".csv,.json,text/csv,application/json" /></label><span class="category-helper">CSV 第一列可使用中文欄位；也支援英文欄位名稱。</span></div><div class="notice" data-bulk-import-status>尚未選擇匯入檔案。</div><div class="bulk-import-preview" data-bulk-import-preview hidden><div class="section-head"><strong data-bulk-preview-count>預覽</strong></div><div class="table-wrap"><table class="table"><thead><tr><th>標題</th><th>創作者</th><th>賽道</th><th>平台</th><th>觀看數</th></tr></thead><tbody></tbody></table></div></div><div class="form-actions"><button type="button" class="btn primary" data-bulk-import-submit disabled>匯入共用案例</button></div>`;
+    content.insertBefore(panel, content.firstChild);
+    panel.__bulkRows = [];
+    panel.querySelector('[data-bulk-template]').addEventListener('click', downloadBulkTemplate);
+    panel.querySelector('[data-bulk-import-file]').addEventListener('change', async event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const rows = parseBulkFile(await file.text(), file.name);
+        renderBulkPreview(panel, rows);
+      } catch (error) {
+        panel.__bulkRows = [];
+        panel.querySelector('[data-bulk-import-submit]').disabled = true;
+        panel.querySelector('[data-bulk-import-preview]').hidden = true;
+        panel.querySelector('[data-bulk-import-status]').textContent = error.message;
+      }
+    });
+    panel.querySelector('[data-bulk-import-submit]').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const rows = panel.__bulkRows || [];
+      if (!rows.length) return;
+      button.disabled = true;
+      panel.querySelector('[data-bulk-import-status]').textContent = `正在匯入 ${rows.length} 筆共用案例…`;
+      try {
+        const result = await window.cloudStore.adminViralBatch(rows);
+        panel.querySelector('[data-bulk-import-status]').textContent = `已匯入 ${result.imported || rows.length} 筆共用案例；所有客戶可在爆款雷達使用。`;
+        event.target.form?.reset?.();
+        panel.querySelector('[data-bulk-import-file]').value = '';
+        panel.__bulkRows = [];
+        panel.querySelector('[data-bulk-import-preview]').hidden = true;
+        await window.cloudStore.refreshCloudState?.();
+      } catch (error) {
+        panel.querySelector('[data-bulk-import-status]').textContent = error.message;
+        button.disabled = false;
+      }
+    });
   }
 
   function addInstagramSourceModesPanel() {
@@ -1405,7 +1597,7 @@
   </style>`);
 
   document.head.insertAdjacentHTML('beforeend', `<style id="instagram-source-modes-style">
-    .instagram-source-modes-panel{margin:0 0 18px}.instagram-mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0 13px;border-bottom:1px solid var(--line);padding-bottom:10px}.instagram-mode-tab{border:1px solid var(--line);border-radius:999px;background:#fffdfa;color:var(--medium);padding:9px 15px;font-size:12px;font-weight:700;cursor:pointer}.instagram-mode-tab:hover,.instagram-mode-tab.active{border-color:var(--pink);background:var(--light-pink);color:var(--dark)}.instagram-mode-actions{display:flex;gap:9px;flex-wrap:wrap;margin:13px 0}.instagram-source-modes-panel [data-instagram-connection-status],.instagram-source-modes-panel [data-manual-import-status]{margin:10px 0}.manual-import-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.manual-import-form .form-field{margin:0}.manual-import-form .form-field.full{grid-column:1/-1}.manual-import-form textarea{min-height:84px}.instagram-source-modes-panel [hidden]{display:none!important}@media(max-width:760px){.manual-import-form{grid-template-columns:1fr}.manual-import-form .form-field.full{grid-column:auto}.instagram-mode-actions{align-items:stretch;flex-direction:column}.instagram-mode-actions .btn{width:100%}}
+    .instagram-source-modes-panel{margin:0 0 18px}.instagram-mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0 13px;border-bottom:1px solid var(--line);padding-bottom:10px}.instagram-mode-tab{border:1px solid var(--line);border-radius:999px;background:#fffdfa;color:var(--medium);padding:9px 15px;font-size:12px;font-weight:700;cursor:pointer}.instagram-mode-tab:hover,.instagram-mode-tab.active{border-color:var(--pink);background:var(--light-pink);color:var(--dark)}.instagram-mode-actions{display:flex;gap:9px;flex-wrap:wrap;margin:13px 0}.instagram-source-modes-panel [data-instagram-connection-status],.instagram-source-modes-panel [data-manual-import-status]{margin:10px 0}.bulk-viral-import-panel{margin:0 0 18px}.bulk-import-picker{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:15px 0 10px}.bulk-file-label{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:999px;padding:10px 15px;background:#fffdfa;font-weight:700;cursor:pointer}.bulk-file-label input{max-width:210px;font-weight:400}.bulk-import-preview{margin-top:12px}.bulk-import-preview .table-wrap{max-height:285px;overflow:auto}.manual-import-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.manual-import-form .form-field{margin:0}.manual-import-form .form-field.full{grid-column:1/-1}.manual-import-form textarea{min-height:84px}.instagram-source-modes-panel [hidden],.bulk-viral-import-panel [hidden]{display:none!important}@media(max-width:760px){.manual-import-form{grid-template-columns:1fr}.manual-import-form .form-field.full{grid-column:auto}.instagram-mode-actions{align-items:stretch;flex-direction:column}.instagram-mode-actions .btn{width:100%}.bulk-file-label{width:100%;border-radius:14px;flex-direction:column;align-items:flex-start}.bulk-file-label input{max-width:100%;width:100%}}
   </style>`);
 
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。

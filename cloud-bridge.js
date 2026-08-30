@@ -511,6 +511,21 @@
     return payload.viral;
   }
 
+  async function adminViralBatch(rows) {
+    if (!client || !session?.access_token) throw new Error('請先登入雲端，才能批次匯入共用案例');
+    const response = await fetch(`${apiBase}/api/admin-viral`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'batch-upsert', rows })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = payload.rowErrors?.length ? `（第 ${payload.rowErrors.map(item => item.row).join('、')} 列需要修正）` : '';
+      throw new Error(`${payload.message || '批次案例匯入失敗'}${detail}`);
+    }
+    return payload;
+  }
+
   async function listInstagramSources() {
     if (!client || !session?.access_token) throw new Error('請先登入雲端，才能管理 Instagram 監測來源');
     const response = await fetch(`${apiBase}/api/instagram-sources`, {
@@ -633,6 +648,7 @@
     generateTopic,
     generateDeliverable,
     adminViral,
+    adminViralBatch,
     listInstagramSources,
     saveInstagramSource,
     instagramSync,
