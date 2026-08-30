@@ -133,7 +133,10 @@ async function disconnect(req, res) {
   const input = readJson(req);
   const id = stringValue(input.id, 100);
   if (!id) return json(res, 422, { error: 'CONNECTION_ID_REQUIRED', message: '缺少要中止的連線' });
-  const result = await client.from('instagram_creator_connections').update({ status: 'REVOKED', access_token_ciphertext: 'revoked', last_error: '' }).eq('id', id).eq('user_id', user.id).select(SAFE_FIELDS).maybeSingle();
+  // Keep the encrypted token server-side for audit/recovery; status=REVOKED
+  // makes the sync worker skip it. The token column is not selectable by the
+  // authenticated role and is never sent to the browser.
+  const result = await client.from('instagram_creator_connections').update({ status: 'REVOKED', last_error: '' }).eq('id', id).eq('user_id', user.id).select(SAFE_FIELDS).maybeSingle();
   if (result.error) throw Object.assign(new Error('Instagram 連線中止失敗'), { code: 'INSTAGRAM_CONNECTION_UPDATE_ERROR', status: 502 });
   return json(res, 200, { connection: result.data || null });
 }
@@ -144,6 +147,9 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   try {
     if (req.method === 'GET' && queryParam(req, 'code')) return await handleCallback(req, res);
+    if (req.method === 'GET' && queryParam(req, 'error')) {
+      return redirect(res, resultRedirect(req, 'error', queryParam(req, 'error_description') || queryParam(req, 'error')));
+    }
     if (req.method === 'GET' && queryParam(req, 'action') === 'start') {
       const { user } = await authenticateRequest(req);
       const config = oauthConfig(req);
@@ -166,4 +172,3 @@ export default async function handler(req, res) {
 }
 
 export { applicationOrigin, authUrl, oauthConfig };
-
