@@ -655,6 +655,67 @@
     };
   }
 
+  async function generateDeliverableFrom77(button) {
+    const topic = window.pending77 || window.generatedTopic;
+    if (!topic) {
+      toast('請先用七十七式產生題目');
+      return;
+    }
+    if (window.pending77Generation) return;
+    window.pending77Generation = true;
+    const values = window.pending77Input || {};
+    const source = state.virals.find(item => item.id === topic.sourceViralContentId);
+    const input = {
+      topic,
+      profile: state.profile,
+      sourceViralContent: source || {},
+      coreMessage: topic.differentiation || topic.hook || topic.title,
+      caseText: state.profile.experienceStories?.[0] || '',
+      ctaTypes: ensureCtaTypes(values.ctaTypes || topic.ctaTypes || topic.ctaType, values.cta || topic.cta),
+      cta: values.cta || topic.cta,
+      angle: topic.angle || values.angle || '步驟',
+      model: values.model || window.workflowModel || ''
+    };
+    if (button) {
+      button.disabled = true;
+      button.dataset.originalText = button.textContent;
+      button.textContent = '正在產出文案…';
+    }
+    let deliverable;
+    try {
+      if (window.cloudStore?.isSignedIn?.() && typeof window.cloudStore.generateDeliverable === 'function') {
+        deliverable = await window.cloudStore.generateDeliverable(input);
+        if (!deliverable?.id) throw new Error('智慧服務沒有回傳有效的內容交付包');
+        deliverable.generationSource = 'openai';
+        toast('OpenAI 已產出完整文案與拍攝交付包');
+      } else {
+        deliverable = createDeliverable(topic, input);
+        toast('尚未登入雲端，已建立本機規則式文案草稿');
+      }
+    } catch (error) {
+      deliverable = createDeliverable(topic, input);
+      toast(`智慧文案服務未完成，已建立本機規則式草稿：${error.message}`);
+    } finally {
+      window.pending77Generation = false;
+      if (button) {
+        button.disabled = false;
+        button.textContent = button.dataset.originalText || '產出完整文案';
+      }
+    }
+    if (!deliverable?.id) {
+      toast('文案產出失敗，請稍後再試');
+      return;
+    }
+    if (!state.topics.some(item => item.id === topic.id)) {
+      state.topics.unshift({ ...topic, status: 'PLANNED' });
+    }
+    state.deliverables.unshift({ ...deliverable, topicId: deliverable.topicId || topic.id });
+    window.workflowTopicId = topic.id;
+    window.workflowDeliverableId = deliverable.id;
+    save();
+    navigate('workflow');
+  }
+
   function deliverableEditor(deliverable) {
     const ctaTypes = ensureCtaTypes(deliverable.ctaTypes ?? deliverable.ctaType, deliverable.segments?.find(segment => segment.key === 'cta')?.text || deliverable.cta);
     const segmentFields = deliverable.segments.map(segment => `<div class="delivery-field"><label>${segment.label}</label><textarea name="segment_${segment.key}">${escapeHtml(segment.text)}</textarea></div>`).join('');
@@ -925,6 +986,60 @@
     const form = document.querySelector('.matrix-layout form');
     if (!form) return;
     appendAngleField(form, form.querySelector('[name="subject"]')?.closest('.form-field'));
+    form.onsubmit = render77DraftWithDeliverable;
+  }
+
+  function addModelToForms() {
+    if (route() !== '77-forms') return;
+    const form = document.querySelector('.matrix-layout form');
+    if (!form || form.querySelector('[name="model"]')) return;
+    const subject = form.querySelector('[name="subject"]')?.closest('.form-field');
+    if (!subject) return;
+    const holder = document.createElement('div');
+    holder.innerHTML = modelSelect(window.workflowModel || '');
+    const field = holder.firstElementChild;
+    if (!field) return;
+    form.insertBefore(field, subject);
+    field.querySelector('[name="model"]')?.addEventListener('change', event => {
+      window.workflowModel = event.currentTarget.value;
+    });
+  }
+
+  function addCtaToForms() {
+    if (route() !== '77-forms') return;
+    const form = document.querySelector('.matrix-layout form');
+    if (!form || form.querySelector('.cta-type-options')) return;
+    const subject = form.querySelector('[name="subject"]')?.closest('.form-field');
+    if (!subject) return;
+    const typeField = document.createElement('div');
+    typeField.className = 'form-field full';
+    typeField.innerHTML = `<label>行動邀請類型</label>${ctaTypesOptions(window.formCtaTypes || ['收藏'])}<div class="category-helper">最多選 3 個；順序會套用到主要與次要行動邀請，分享與轉發分開記錄。</div>`;
+    const textField = document.createElement('div');
+    textField.className = 'form-field full';
+    textField.innerHTML = '<label>行動邀請文字</label><input name="cta" placeholder="例如：收藏這支，下次需要時再打開。" />';
+    form.insertBefore(typeField, subject);
+    form.insertBefore(textField, subject);
+    const sync = () => {
+      window.formCtaTypes = [...form.querySelectorAll('input[name="ctaTypes"]:checked')].map(input => input.value);
+    };
+    form.querySelectorAll('input[name="ctaTypes"]').forEach(input => input.addEventListener('change', sync));
+    sync();
+  }
+
+  function render77DraftWithDeliverable(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const values = Object.fromEntries(formData);
+    values.ctaTypes = formData.getAll('ctaTypes');
+    const topic = topicDraft(values);
+    topic.ctaTypes = ensureCtaTypes(values.ctaTypes, values.cta || topic.cta);
+    topic.cta = String(values.cta || topic.cta || '').trim();
+    window.pending77 = topic;
+    window.pending77Input = values;
+    window.generatedTopic = topic;
+    const box = document.getElementById('formResult');
+    if (!box) return;
+    box.innerHTML = `<article class="result-card"><span class="tag">${escapeHtml(topic.contentTheme)} × ${escapeHtml(topic.trafficCodes[0])}</span><h3>${escapeHtml(topic.title)}</h3><p>${escapeHtml(topic.hook)}</p><div class="category-helper">依此組合產出母內容五段式、逐字稿、貼文文案、潤稿說明、七頁輪播、四平台版本與五鏡頭分鏡。</div><div class="form-actions"><button type="button" class="btn primary" onclick="generateDeliverableFrom77(this)">產出完整文案</button><button type="button" class="btn" onclick="startGenerate()">到智慧選題調整</button><button type="button" class="btn terracotta" onclick="saveGeneratedTopic()">收藏題目</button></div></article>`;
   }
 
   function addAngleToGenerate() {
@@ -1041,6 +1156,8 @@
     setActive();
     setTimeout(() => {
       addAngleToForms();
+      addModelToForms();
+      addCtaToForms();
       addAngleToGenerate();
       if (typeof enhanceSelects === 'function') enhanceSelects();
       if (typeof enhanceCategoryPicker === 'function') enhanceCategoryPicker();
@@ -1059,6 +1176,8 @@
   window.savePositioning = savePositioning;
   window.saveTopicScore = saveTopicScore;
   window.createDeliverableFromForm = createDeliverableFromForm;
+  window.generateDeliverableFrom77 = generateDeliverableFrom77;
+  window.generateFrom77 = render77DraftWithDeliverable;
   window.saveDeliverable = saveDeliverable;
   window.toggleCtaTypeCheckbox = toggleCtaTypeCheckbox;
   window.deleteDeliverable = deleteDeliverable;
