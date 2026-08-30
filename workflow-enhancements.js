@@ -1268,6 +1268,10 @@
     .radar-filters{display:grid;grid-template-columns:minmax(0,1fr);align-items:center;gap:9px}.radar-filters .radar-search-control{grid-column:1/-1;display:flex;align-items:center;gap:9px;width:100%;min-width:0}.radar-search-control input{flex:1;min-width:0;width:100%}.radar-search-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:9px 16px;border:0;background:#f1f3f3;color:var(--dark);font-weight:500}.radar-search-btn:hover,.radar-search-btn:focus-visible{background:#e7eae9;outline:2px solid var(--soft-blue);outline-offset:2px}.radar-search-icon{position:relative;width:15px;height:15px;border:2px solid currentColor;border-radius:50%;display:inline-block;flex:0 0 15px}.radar-search-icon::after{content:"";position:absolute;width:7px;height:2px;right:-5px;bottom:-2px;background:currentColor;border-radius:2px;transform:rotate(45deg);transform-origin:left center}.radar-filters>.custom-select{width:100%;min-width:0}.radar-filters>.muted{grid-column:1/-1}@media(min-width:761px){.radar-filters{grid-template-columns:repeat(4,minmax(0,1fr))}.radar-filters .radar-search-control{grid-column:1/-1}.radar-filters>.custom-select{grid-column:auto}}@media(max-width:760px){.radar-search-control{width:100%;min-width:0}.radar-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.radar-filters .radar-search-control,.radar-filters>.muted{grid-column:1/-1}.radar-filters>.custom-select{grid-column:auto}}
   </style>`);
 
+  document.head.insertAdjacentHTML('beforeend', `<style id="settings-threshold-style">
+    .form-field input[name="outlierThreshold"]{height:42px;min-height:42px;align-self:start}
+  </style>`);
+
   // 初始頁面已由舊版 render 產生；這裡立即以增強版重新繪製並接管後續路由。
   setTimeout(enhanceRadarSearch, 0);
   enhancedRender();

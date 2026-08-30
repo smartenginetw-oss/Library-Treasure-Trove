@@ -185,15 +185,20 @@ window.opt = function localizedOptions(list, current, includeBlank = false) {
 };
 function localizeChineseUi() {
   const replace = value => Object.keys(UI_LABELS).sort((a, b) => b.length - a.length).reduce((text, key) => text.split(key).join(UI_LABELS[key]), value);
+  const normalize = value => replace(value)
+    .replace(/Instagram(?:\s+社群)+/g, 'Instagram 社群')
+    .replace(/TikTok(?:\s+短影音)+/g, 'TikTok 短影音')
+    .replace(/YouTube 短影音(?:\s+短影音)+/g, 'YouTube 短影音')
+    .replace(/Threads 貼文(?:\s+貼文)+/g, 'Threads 貼文');
   document.querySelectorAll('option, .custom-select-option, th, td, label, button, a, h1, h2, h3, h4, p, span, small, strong, em, div').forEach(node => {
     if (node.children.length === 0 && node.textContent) {
-      const localized = replace(node.textContent);
+      const localized = normalize(node.textContent);
       if (localized !== node.textContent) node.textContent = localized;
     }
   });
   document.querySelectorAll('input, textarea, select').forEach(node => {
     ['placeholder', 'aria-label', 'title'].forEach(attribute => {
-      if (node.hasAttribute(attribute)) node.setAttribute(attribute, replace(node.getAttribute(attribute)));
+      if (node.hasAttribute(attribute)) node.setAttribute(attribute, normalize(node.getAttribute(attribute)));
     });
   });
   const searchInput = document.getElementById('radarQ');
