@@ -1142,68 +1142,8 @@
     if (!content || content.querySelector('[data-workflow-summary]')) return;
     content.insertAdjacentHTML('beforeend', `<section class="panel workflow-summary" data-workflow-summary><div class="section-head"><div><h2>手冊工作流進度</h2><p>把定位、題庫、交付與復盤串成下一個可執行動作。</p></div><span class="tag ${completion.complete ? 'sage' : 'pink'}">定位 ${completion.done}/${completion.total}</span></div><div class="workflow-summary-grid"><button type="button" onclick="navigate('positioning')"><strong>定位資料卡</strong><small>補齊三支柱與素材邊界</small></button><button type="button" onclick="navigate('topic-scoring')"><strong>題目評分</strong><small>五項條件排出製作順序</small></button><button type="button" onclick="navigate('workflow')"><strong>內容交付包</strong><small>母內容、輪播、四平台、分鏡</small></button><button type="button" onclick="navigate('reviews')"><strong>復盤實驗</strong><small>${dueCount ? `有 ${dueCount} 筆待處理` : '發布後 48–72 小時回來記錄'}</small></button></div></section>`);
   };
-  admin = function () { legacyAdmin(); addInstagramSourceModesPanel(); addInstagramSyncPanel(); addBulkViralImportPanel(); };
+  admin = function () { legacyAdmin(); addInstagramSourceModesPanel(); addBulkViralImportPanel(); };
   enhanceTopicDraft();
-
-  function formatInstagramSyncTime(value) {
-    if (!value) return '尚未同步';
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? '尚未同步' : new Intl.DateTimeFormat('zh-TW', { dateStyle: 'short', timeStyle: 'short' }).format(parsed);
-  }
-
-  function instagramSourceStatus(source) {
-    const status = source.last_sync_status || 'PENDING';
-    const label = status === 'SUCCESS' ? '已同步' : status === 'ERROR' ? '同步失敗' : '等待同步';
-    const className = status === 'SUCCESS' ? 'sage' : status === 'ERROR' ? 'pink' : 'blue';
-    const error = status === 'ERROR' && source.last_sync_error
-      ? `<small class="instagram-source-error">${escapeHtml(source.last_sync_error)}</small>`
-      : '';
-    return `<span class="tag ${className}">${label}</span><small>${escapeHtml(formatInstagramSyncTime(source.last_synced_at))}</small>${error}`;
-  }
-
-  function renderInstagramSources(panel, sources) {
-    const list = panel.querySelector('[data-instagram-sources]');
-    if (!list) return;
-    list.innerHTML = sources.length ? sources.map(source => `<div class="instagram-source-row"><div><strong>${escapeHtml(source.display_name || `@${source.username}`)}</strong><small>@${escapeHtml(source.username)} · ${escapeHtml(source.niche || '未分類')}</small></div><div class="instagram-source-meta">${instagramSourceStatus(source)}<button type="button" class="btn tiny" data-instagram-toggle="${escapeHtml(source.id)}" data-enabled="${source.enabled ? 'true' : 'false'}">${source.enabled ? '停用' : '啟用'}</button></div></div>`).join('') : '<div class="empty"><strong>尚未設定監測帳號</strong>請先加入 Instagram 專業帳號名稱。</div>';
-    list.querySelectorAll('[data-instagram-toggle]').forEach(button => button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        await window.cloudStore.saveInstagramSource({ action: button.dataset.enabled === 'true' ? 'disable' : 'enable', id: button.dataset.instagramToggle });
-        await loadInstagramSources(panel);
-      } catch (error) {
-        panel.querySelector('[data-instagram-sync-status]').textContent = error.message;
-        button.disabled = false;
-      }
-    }));
-  }
-
-  async function loadInstagramSources(panel) {
-    const list = panel.querySelector('[data-instagram-sources]');
-    if (!window.cloudStore?.isSignedIn?.()) {
-      list.innerHTML = '<div class="empty"><strong>請先登入雲端</strong>登入後才能管理監測帳號。</div>';
-      return;
-    }
-    try {
-      const sources = await window.cloudStore.listInstagramSources();
-      renderInstagramSources(panel, sources);
-    } catch (error) {
-      list.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
-    }
-  }
-
-  async function refreshInstagramConfigNotice(panel) {
-    const notice = panel.querySelector('[data-instagram-sync-status]');
-    if (!notice || typeof window.cloudStore?.getHealth !== 'function') return;
-    try {
-      const health = await window.cloudStore.getHealth();
-      const configured = health.configured || {};
-      notice.textContent = configured.instagram && configured.cron
-        ? 'Instagram API 與每日排程已就緒；不需要創作者密碼，只會在伺服器端使用 token。'
-        : '需要先在部署平台設定 Instagram API 與 Cron 憑證；不需要創作者密碼，只會在伺服器端使用 token。';
-    } catch {
-      notice.textContent = '正在檢查 Instagram API 設定；不需要創作者密碼，只會在伺服器端使用 token。';
-    }
-  }
 
   const BULK_VIRAL_COLUMNS = [
     { key: 'id', label: '案例編號' },
@@ -1527,54 +1467,6 @@
     });
   }
 
-  function addInstagramSyncPanel() {
-    if (route() !== 'admin/viral-content') return;
-    const content = document.getElementById('appContent');
-    if (!content || content.querySelector('[data-instagram-sync-panel]')) return;
-    const panel = document.createElement('section');
-    panel.className = 'panel instagram-sync-panel';
-    panel.dataset.instagramSyncPanel = 'true';
-    panel.innerHTML = `<div class="section-head"><div><h2>Instagram 自動同步</h2><p>每日 11:00（台灣時間）由伺服器逐頁同步可取得的公開 Reels；也可立即同步。</p></div><button type="button" class="btn primary" data-instagram-sync>立即同步</button></div><div class="notice" data-instagram-sync-status>需要先在部署平台設定 Instagram API 憑證；不需要創作者密碼，只會在伺服器端使用 token。</div><form class="instagram-source-form" data-instagram-source-form><div class="form-field"><label>Instagram 帳號</label><input name="username" placeholder="例如：ray_eat_food" required /></div><div class="form-field"><label>顯示名稱</label><input name="displayName" placeholder="例如：陳芃芃的美食天地" /></div><div class="form-field"><label>賽道</label><select name="niche">${opt(NICHES, state.profile.primaryNiche)}</select></div><div class="form-actions"><button class="btn" type="submit">加入監測</button></div></form><div class="instagram-source-list" data-instagram-sources><div class="empty">讀取監測帳號中…</div></div>`;
-    content.insertBefore(panel, content.firstChild);
-    panel.querySelector('[data-instagram-source-form]').addEventListener('submit', async event => {
-      event.preventDefault();
-      const button = event.target.querySelector('button[type="submit"]');
-      button.disabled = true;
-      try {
-        const values = Object.fromEntries(new FormData(event.target));
-        await window.cloudStore.saveInstagramSource(values);
-        event.target.reset();
-        await loadInstagramSources(panel);
-        panel.querySelector('[data-instagram-sync-status]').textContent = '監測帳號已加入；可按「立即同步」測試。';
-      } catch (error) {
-        panel.querySelector('[data-instagram-sync-status]').textContent = error.message;
-      } finally {
-        button.disabled = false;
-      }
-    });
-    panel.querySelector('[data-instagram-sync]').addEventListener('click', async event => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      panel.querySelector('[data-instagram-sync-status]').textContent = '正在向 Instagram API 取得最新資料…';
-      try {
-        const result = await window.cloudStore.instagramSync();
-        const truncated = result.truncatedSources?.length ? `；${result.truncatedSources.join('、')} 已達本次分頁上限，仍可能有更早內容未讀取` : '';
-        const errorDetails = result.errors?.length
-          ? ` ${result.errors.map(item => `@${item.username}：${item.message}`).join('；')}`
-          : '';
-        panel.querySelector('[data-instagram-sync-status]').textContent = result.errors?.length ? `同步完成但有 ${result.errors.length} 個來源失敗。${errorDetails}${truncated}` : `同步完成，新增或更新 ${result.imported || 0} 筆 Reels。${truncated}`;
-        await loadInstagramSources(panel);
-        await window.cloudStore.refreshCloudState?.();
-      } catch (error) {
-        panel.querySelector('[data-instagram-sync-status]').textContent = error.message;
-      } finally {
-        button.disabled = false;
-      }
-    });
-    loadInstagramSources(panel);
-    refreshInstagramConfigNotice(panel);
-  }
-
   function enhancedRender() {
     addWorkflowNavigation();
     ensureWorkflowState();
@@ -1702,10 +1594,6 @@
 
   document.head.insertAdjacentHTML('beforeend', `<style id="settings-threshold-style">
     .form-field input[name="outlierThreshold"]{height:42px;min-height:42px;align-self:start}
-  </style>`);
-
-  document.head.insertAdjacentHTML('beforeend', `<style id="instagram-sync-style">
-    .instagram-sync-panel{margin:0 0 18px}.instagram-source-form{display:grid;grid-template-columns:1.1fr 1.1fr .8fr auto;gap:10px;align-items:end;margin:14px 0}.instagram-source-form .form-field{margin:0}.instagram-source-list{display:grid;gap:7px}.instagram-source-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fffdfa}.instagram-source-row>div:first-child{display:grid;gap:2px;min-width:0}.instagram-source-row strong{font-size:12px}.instagram-source-row small{color:var(--gray);font-size:10px}.instagram-source-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.instagram-source-meta small{white-space:nowrap}.instagram-source-meta .instagram-source-error{flex-basis:100%;max-width:620px;color:#a45f56;white-space:normal;overflow-wrap:anywhere}.instagram-sync-panel [data-instagram-sync-status]{margin:0}.instagram-sync-panel .section-head{margin-top:0}@media(max-width:760px){.instagram-source-form{grid-template-columns:1fr 1fr}.instagram-source-form .form-actions{grid-column:1/-1}.instagram-source-row{align-items:flex-start;flex-direction:column}.instagram-source-meta{justify-content:flex-start}.instagram-source-meta .instagram-source-error{max-width:100%}}
   </style>`);
 
   document.head.insertAdjacentHTML('beforeend', `<style id="instagram-source-modes-style">
